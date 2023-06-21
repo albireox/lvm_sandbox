@@ -105,7 +105,7 @@ setup.py
 
 .nox/
 
-data/
+# data/
 results
 inputs/
 
