@@ -56,7 +56,11 @@ def reprocess_wcs(files: list[pathlib.Path]):
     sources, wcs_pre = data
 
     # Calculate new astrometric solution from files. This calls rot_shift_locs().
-    wcs_new = solve_from_files([str(file_) for file_ in files], tel)
+    try:
+        wcs_new = solve_from_files([str(file_) for file_ in files], tel)
+    except RuntimeError:
+        return None
+
     if wcs_new is None:
         return None
 
