@@ -743,7 +743,7 @@ description = "Temporary package for LVM guiding and focusing"
 optional = false
 python-versions = "^3.10,<3.12"
 files = []
-develop = false
+develop = true
 
 [package.dependencies]
 astropy = "^5.2.1"
@@ -2090,4 +2090,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "abf23fcb368fbc9f14155beb1b75f8fd6aa7da58523819ecfeaba3cc76930590"
+content-hash = "3c64671a227382577446e2c7a76857b907bbb475795e04977f81f1cd044ba8c7"
