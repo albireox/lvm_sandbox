@@ -10,11 +10,11 @@ astropy = ">=5.0.0"
 pandas = "^2.0.0"
 numpy = "^1.21.1"
 tables = "^3.6.1"
-sep = "^1.2.0"
 matplotlib = "^3.5"
 seaborn = "^0.12.0"
 sdsstools = "^1.1.0"
-lvmguider = { path = "../lvmguider", develop=true }
+lvmguider = { path = "/home/sdss5/software/lvmguider/main", develop=true }
+lvmgort = { path = "/home/sdss5/software/lvmgort/main", develop=true }
 
 [tool.poetry.dev-dependencies]
 ipython = ">=8.0.0"
