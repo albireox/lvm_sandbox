@@ -3,7 +3,7 @@
 #
 # @Author: José Sánchez-Gallego (gallegoj@uw.edu)
 # @Date: 2023-07-09
-# @Filename: determine_offsets.py
+# @Filename: pointing_model.py
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
 from __future__ import annotations
@@ -13,7 +13,12 @@ import pathlib
 
 import numpy
 import pandas
-from astropy.coordinates import uniform_spherical_random_surface
+from astropy.coordinates import (
+    EarthLocation,
+    SkyCoord,
+    uniform_spherical_random_surface,
+)
+from astropy.time import Time
 from gort import Gort
 from numpy.random import choice
 
@@ -44,8 +49,18 @@ def get_random_sample(
 
     points = numpy.zeros((0, 2), dtype=numpy.float64)
 
+    lco = EarthLocation.of_site("Las Campanas Observatory")
+    now = Time.now()
+
     while True:
         sph_points = uniform_spherical_random_surface(n_points)
+
+        radec = SkyCoord(ra=sph_points.lon.deg, dec=sph_points.lat.deg, unit="deg")
+        radec.location = lco
+        radec.obstime = now
+
+        altaz = radec.transform_to("altaz")
+        sph_points = sph_points[altaz.alt.deg > 30]
 
         radec = numpy.array(
             [sph_points.lon.deg, sph_points.lat.deg],
@@ -97,8 +112,8 @@ async def get_offset(
 
     replies = await gort.guiders[telescope].actor.commands.guide(
         reply_callback=gort.guiders[telescope].print_reply,
-        fieldra=ra,
-        fielddec=dec,
+        ra=ra,
+        dec=dec,
         exposure_time=exposure_time,
         one=True,
         apply_corrections=False,
@@ -109,6 +124,7 @@ async def get_offset(
         return None
 
     return_dict = {"commanded_ra": ra, "commanded_dec": dec, "telescope": telescope}
+    return_dict["seqno"] = replies["frame"]["seqno"]
     measured_poining = replies["measured_pointing"]
     return_dict["measured_ra"] = measured_poining["ra"]
     return_dict["measured_dec"] = measured_poining["dec"]
@@ -121,7 +137,7 @@ async def get_offset(
     return return_dict
 
 
-async def determine_offsets(
+async def pointing_model(
     output_file: str | pathlib.Path,
     n_points: int,
     ra_range: tuple[float, float],
@@ -202,14 +218,14 @@ async def determine_offsets(
 
 
 if __name__ == "__main__":
-    NPOINTS = 20
-    RA_RANGE = (240, 355)
+    NPOINTS = 95
+    RA_RANGE = (30, 270)
     DEC_RANGE = (-75, 0)
     TELESCOPES = ["sci", "spec", "skye", "skyw"]
 
     asyncio.run(
-        determine_offsets(
-            "offsets.h5",
+        pointing_model(
+            "pointing_100pt.h5",
             NPOINTS,
             RA_RANGE,
             DEC_RANGE,
