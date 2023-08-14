@@ -1,4 +1,3 @@
-
 # LVM fiber mapping file: lvm_fiducial_fibermap
 #
 # This file is a machine-readble translation of the fiducial fiber mapping
@@ -25,7 +24,7 @@
 # 10) ypmm: The y coordinate in mm of the fiber relative to the centroid
 # 11) ringnum: Number of the IFU ring the fiber belongs to
 # 12) fibstatus: 0=live, 1=dead, 2=low, 3=repair, 4=short
-        
+
 schema:
   - name: fiberid
     dtype: int
@@ -57,7 +56,8 @@ schema:
     unit: null
   - name: telescope
     dtype: str
-    description: the name of the telescope; Sci, Spec, SkyE/W for science, standards,
+    description:
+      the name of the telescope; Sci, Spec, SkyE/W for science, standards,
       or skies
     unit: null
   - name: xpmm

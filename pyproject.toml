@@ -16,7 +16,7 @@ sdsstools = "^1.1.0"
 lvmguider = { path = "/home/sdss5/software/lvmguider/main", develop=true }
 lvmgort = { path = "/home/sdss5/software/lvmgort/main", develop=true }
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 ipython = ">=8.0.0"
 invoke = "*"
 flake8 = "*"
@@ -27,20 +27,29 @@ ipdb = ">=0.13.3"
 autopep8 = ">=1.5.4"
 black = {version = ">=20.8b1", allow-prereleases = true}
 pandas-stubs = ">=2.0.0"
+ruff = ">=0.0.284"
 
 [tool.black]
 line-length = 88
 target-version = ['py311']
 fast = true
 
-[tool.isort]
-profile = "black"
-sections = ["FUTURE", "STDLIB", "TYPING", "THIRDPARTY", "SDSS", "FIRSTPARTY", "LOCALFOLDER"]
-default_section = "THIRDPARTY"
-known_first_party = "lvm_sandbox"
-known_typing = ["typing"]
-known_sdss = ["sdsstools"]
-lines_after_imports = 2
+[tool.ruff]
+line-length = 88
+target-version = 'py311'
+select = ["E", "F", "I"]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F403", "F401", "E402"]
+
+[tool.ruff.isort]
+known-first-party = ["ifoo"]
+lines-after-imports = 2
+section-order = ["future", "standard-library", "typing", "third-party", "sdss", "first-party", "local-folder"]
+
+[tool.ruff.isort.sections]
+typing = ["typing"]
+sdss = ["sdsstools"]
 
 [build-system]
 requires = ["poetry-core>=1.1.0"]

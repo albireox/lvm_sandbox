@@ -9,7 +9,6 @@
 import asyncio
 
 import pyds9
-
 from clu.client import AMQPClient
 
 
