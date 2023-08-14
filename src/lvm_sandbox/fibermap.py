@@ -26,7 +26,7 @@ def read_fibermap():
     schema = fibermap_y["schema"]
     cols = [it["name"] for it in schema]
 
-    fibers = pandas.DataFrame(numpy.array(fibermap_y["fibers"]), columns=cols)
+    fibers = pandas.DataFrame(fibermap_y["fibers"], columns=cols)
 
     return fibers
 
@@ -35,9 +35,12 @@ def plot_fibermap():
     """Plots the fibermap."""
 
     fibers = read_fibermap()
-
-    plt.scatter
+    plt.scatter(fibers.xpmm, fibers.ypmxx)
+    plt.xlabel("xpmm")
+    plt.ylabel("ypmxx")
+    plt.show()
 
 
 if __name__ == "__main__":
-    read_fibermap()
+    # read_fibermap()
+    plot_fibermap()
