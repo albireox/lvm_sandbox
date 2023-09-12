@@ -6,15 +6,16 @@ authors = ["José Sánchez-Gallego <gallegoj@uw.edu>"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
-astropy = ">=5.0.0"
+astropy = "^5.0.0"
 pandas = "^2.0.0"
 numpy = "^1.21.1"
 tables = "^3.6.1"
 matplotlib = "^3.5"
 seaborn = "^0.12.0"
 sdsstools = "^1.1.0"
-lvmguider = { path = "/home/sdss5/software/lvmguider/main", develop=true }
-lvmgort = { path = "/home/sdss5/software/lvmgort/main", develop=true }
+lvmgort = "^0.5.0"
+lvmguider = "^0.4.0b1"
+fastparquet = "^2023.8.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = ">=8.0.0"
