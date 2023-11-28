@@ -5,7 +5,7 @@ description = "Sandbox for LVM scripts and tools."
 authors = ["José Sánchez-Gallego <gallegoj@uw.edu>"]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.12"
+python = ">=3.10,<3.13"
 astropy = ">=5.0.0"
 pandas = "^2.0.0"
 numpy = "^1.21.1"
@@ -13,15 +13,14 @@ tables = "^3.6.1"
 matplotlib = "^3.5"
 seaborn = "^0.12.0"
 sdsstools = "^1.1.0"
-lvmguider = { path = "/home/sdss5/software/lvmguider/main", develop=true }
-lvmgort = { path = "/home/sdss5/software/lvmgort/main", develop=true }
+lvmguider = ">=0.1.0"
+lvmgort = ">=0.1.0"
+influxdb-client = "^1.37.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = ">=8.0.0"
 invoke = "*"
-flake8 = "*"
 doc8 = ">=0.8.0"
-isort = ">=5.0.0"
 typing_extensions = {version="*", python="~3.7"}
 ipdb = ">=0.13.3"
 autopep8 = ">=1.5.4"
@@ -38,18 +37,19 @@ fast = true
 line-length = 88
 target-version = 'py311'
 select = ["E", "F", "I"]
+unfixable = ["F841"]
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F403", "F401", "E402"]
 
 [tool.ruff.isort]
-known-first-party = ["ifoo"]
+known-first-party = ["lvm_sandbox"]
 lines-after-imports = 2
 section-order = ["future", "standard-library", "typing", "third-party", "sdss", "first-party", "local-folder"]
 
 [tool.ruff.isort.sections]
 typing = ["typing"]
-sdss = ["sdsstools"]
+sdss = ["sdsstools", "lvmguider", "lvmgort"]
 
 [build-system]
 requires = ["poetry-core>=1.1.0"]
