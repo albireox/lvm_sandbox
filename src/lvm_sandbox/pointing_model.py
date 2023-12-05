@@ -9,41 +9,43 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 import pathlib
 
 import numpy
 import pandas
+from astropy import units as uu
 from astropy.coordinates import (
+    AltAz,
     EarthLocation,
     SkyCoord,
     uniform_spherical_random_surface,
 )
 from astropy.time import Time
 from gort import Gort
-from numpy.random import choice
 
 
 def get_random_sample(
     n_points: int,
-    ra_range: tuple[float, float] | None = None,
-    dec_range: tuple[float, float] | None = None,
+    alt_range: tuple[float, float] | None = None,
+    az_range: tuple[float, float] | None = None,
 ):
     """Provides a random sample of RA/Dec points on the surface of a sphere.
 
     Parameters
     ----------
     n_points
-        Number of points to return. This number is ensured even if ``ra_range``
-        or ``dec_range`` are provided.
-    ra_range
-        The range of RA to which to limit the sample, in degrees.
-    dec_range
-        The range of Dec to which to limit the sample, in degrees.
+        Number of points to return. This number is ensured even if ``alt_range``
+        or ``az_range`` are provided.
+    alt_range
+        The range of altitude to which to limit the sample, in degrees.
+    az_range
+        The range of azimuth to which to limit the sample, in degrees.
 
     Returns
     -------
     coordinates
-        A 2D array with the RA/Dec coordinates of the points on the sphere.
+        A 2D array with the Alt/Az coordinates of the points on the sphere.
 
     """
 
@@ -54,30 +56,28 @@ def get_random_sample(
 
     while True:
         sph_points = uniform_spherical_random_surface(n_points)
+        altaz = AltAz(
+            alt=sph_points.lat.deg * uu.deg,
+            az=sph_points.lon.deg * uu.deg,
+            location=lco,
+            obstime=now,
+        )
 
-        radec = SkyCoord(ra=sph_points.lon.deg, dec=sph_points.lat.deg, unit="deg")
-        radec.location = lco
-        radec.obstime = now
+        if alt_range is not None:
+            alt = altaz.alt.deg
+            altaz = altaz[(alt > alt_range[0]) & (alt < alt_range[1])]
+        if az_range is not None:
+            az = altaz.az.deg
+            altaz = altaz[(az > az_range[0]) & (az < az_range[1])]
 
-        altaz = radec.transform_to("altaz")
-        sph_points = sph_points[altaz.alt.deg > 30]
+        altaz = SkyCoord(altaz[altaz.alt.deg > 30])
 
-        radec = numpy.array(
-            [sph_points.lon.deg, sph_points.lat.deg],
-            dtype=numpy.float64,
-        ).T
+        altaz_array = numpy.array([altaz.alt.deg, altaz.az.deg], dtype=numpy.float64).T
 
-        if ra_range is not None:
-            radec = radec[(radec[:, 0] > ra_range[0]) & (radec[:, 0] < ra_range[1])]
-        if dec_range is not None:
-            radec = radec[(radec[:, 1] > dec_range[0]) & (radec[:, 1] < dec_range[1])]
-
-        points = numpy.vstack((points, radec))
+        points = numpy.vstack((points, altaz_array))
 
         if points.shape[0] >= n_points:
-            idx = numpy.arange(points.shape[0])
-            sel = choice(idx, n_points)
-            return points[sel]
+            return points[0:n_points, :]
 
 
 async def get_offset(
@@ -104,14 +104,14 @@ async def get_offset(
     -------
     offset
         A dictionary with the commanded and measured RA/Dec and the offset,
-        or None if the measurement failed.
+        or `None` if the measurement failed.
 
     """
 
     await gort.telescopes[telescope].goto_coordinates(ra=ra, dec=dec)
 
     replies = await gort.guiders[telescope].actor.commands.guide(
-        reply_callback=gort.guiders[telescope].print_reply,
+        reply_callback=partial(gort.guiders[telescope].log_replies, skip_debug=False),
         ra=ra,
         dec=dec,
         exposure_time=exposure_time,
@@ -125,14 +125,19 @@ async def get_offset(
 
     return_dict = {"commanded_ra": ra, "commanded_dec": dec, "telescope": telescope}
     return_dict["seqno"] = replies["frame"]["seqno"]
-    measured_poining = replies["measured_pointing"]
-    return_dict["measured_ra"] = measured_poining["ra"]
-    return_dict["measured_dec"] = measured_poining["dec"]
-    return_dict["offset_ra"] = measured_poining["radec_offset"][0]
-    return_dict["offset_dec"] = measured_poining["radec_offset"][1]
-    return_dict["offset_ax0"] = measured_poining["motax_offset"][0]
-    return_dict["offset_ax1"] = measured_poining["motax_offset"][1]
-    return_dict["separation"] = measured_poining["separation"]
+    measured_pointing = replies["measured_pointing"]
+    return_dict["measured_ra"] = measured_pointing["ra"]
+    return_dict["measured_dec"] = measured_pointing["dec"]
+    return_dict["offset_ra"] = measured_pointing["radec_offset"][0]
+    return_dict["offset_dec"] = measured_pointing["radec_offset"][1]
+    return_dict["offset_ax0"] = measured_pointing["motax_offset"][0]
+    return_dict["offset_ax1"] = measured_pointing["motax_offset"][1]
+    return_dict["separation"] = measured_pointing["separation"]
+
+    # await gort.telescopes[telescope].actor.commands.modelAddPoint(
+    #     measured_pointing["ra"] / 15,
+    #     measured_pointing["dec"],
+    # )
 
     return return_dict
 
@@ -140,8 +145,8 @@ async def get_offset(
 async def pointing_model(
     output_file: str | pathlib.Path,
     n_points: int,
-    ra_range: tuple[float, float],
-    dec_range: tuple[float, float],
+    alt_range: tuple[float, float],
+    az_range: tuple[float, float],
     telescopes: list[str] = ["sci", "spec", "skye", "skyw"],
 ):
     """Iterates over a series of points on the sky measuring offsets.
@@ -152,18 +157,20 @@ async def pointing_model(
         The HD5 file where to save the resulting table.
     n_points
         Number of points on the sky to measure.
-    ra_range
-        The range of RA to which to limit the sample, in degrees.
-    dec_range
-        The range of Dec to which to limit the sample, in degrees.
+    alt_range
+        The range of altitude to which to limit the sample, in degrees.
+    az_range
+        The range of azimuth to which to limit the sample, in degrees.
     telescopes
         The list of telescopes to expose.
 
     """
 
+    lco = EarthLocation.of_site("Las Campanas Observatory")
+
     gort = await Gort(verbosity="debug").init()
 
-    points = get_random_sample(n_points, ra_range=ra_range, dec_range=dec_range)
+    points = get_random_sample(n_points, alt_range=alt_range, az_range=az_range)
 
     outputs_dir = pathlib.Path(__file__).parents[2] / "outputs"
     output_file = pathlib.Path(output_file)
@@ -174,10 +181,24 @@ async def pointing_model(
     store = pandas.HDFStore(str(output_file), "a")
     data = store["data"] if "data" in store else None
 
-    await gort.telescopes.goto_named_position("zenith")
+    # await gort.telescopes.goto_named_position("zenith")
+    await gort.telescopes.home(home_kms=False)
 
-    for npoint, (ra, dec) in enumerate(points):
+    for npoint, (alt, az) in enumerate(points):
         print()
+
+        altaz = SkyCoord(
+            AltAz(
+                alt=alt * uu.deg,
+                az=az * uu.deg,
+                obstime=Time.now(),
+                location=lco,
+            )
+        )
+        icrs = altaz.transform_to("icrs")
+        ra = icrs.ra.deg
+        dec = icrs.dec.deg
+
         gort.log.info(f"({npoint+1}/{n_points}): Going to {ra:.6f}, {dec:.6f}.")
 
         results = await asyncio.gather(
@@ -218,17 +239,20 @@ async def pointing_model(
 
 
 if __name__ == "__main__":
-    NPOINTS = 95
-    RA_RANGE = (30, 270)
-    DEC_RANGE = (-75, 0)
-    TELESCOPES = ["sci", "spec", "skye", "skyw"]
+    NPOINTS = 50
+    ALT_RANGE = (40, 85)
+    AZ_RANGE = (0, 355)
+    # TELESCOPES = ["sci", "spec", "skye", "skyw"]
+    TELESCOPES = ["spec"]
+
+    OUTPUT = "pointing_model_sci_10points_add.h5"
 
     asyncio.run(
         pointing_model(
-            "pointing_100pt.h5",
+            OUTPUT,
             NPOINTS,
-            RA_RANGE,
-            DEC_RANGE,
+            ALT_RANGE,
+            AZ_RANGE,
             telescopes=TELESCOPES,
         )
     )
