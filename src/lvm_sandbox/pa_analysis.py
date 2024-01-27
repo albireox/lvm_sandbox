@@ -19,9 +19,10 @@ import pandas
 import seaborn
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.time import Time
+from matplotlib import pyplot as plt
+
 from lvmguider.tools import polyfit_with_sigclip
 from lvmguider.transformations import azel2sazsel
-from matplotlib import pyplot as plt
 
 from lvm_sandbox.tools.utils import concat_agcam_data
 

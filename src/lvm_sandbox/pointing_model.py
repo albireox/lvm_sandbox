@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import asyncio
-from functools import partial
 import pathlib
+from functools import partial
 
 import numpy
 import pandas
