@@ -16,6 +16,7 @@ sdsstools = "^1.1.0"
 lvmgort = ">=0.5.0"
 lvmguider = ">=0.4.0"
 fastparquet = ">=2023.8.0"
+pyarrow = "^15.0.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = ">=8.0.0"
