@@ -180,6 +180,7 @@ async def pointing_model(
 
     store = pandas.HDFStore(str(output_file), "a")
     data = store["data"] if "data" in store else None
+    assert isinstance(data, pandas.DataFrame) or data is None
 
     # await gort.telescopes.goto_named_position("zenith")
     await gort.telescopes.home(home_kms=False)
