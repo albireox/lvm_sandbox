@@ -28,6 +28,7 @@ autopep8 = ">=1.5.4"
 black = {version = ">=20.8b1", allow-prereleases = true}
 pandas-stubs = ">=2.0.0"
 ruff = ">=0.0.284"
+nptyping = ">=2.5.0"
 
 [tool.black]
 line-length = 88
