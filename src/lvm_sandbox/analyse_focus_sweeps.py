@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import pathlib
 
+import numpy
 import pandas
+import scipy.stats
+import seaborn
 from astropy.io import fits
-from matplotlib import pyplot as plt
+
+from lvmguider.focus import fit_spline
 
 
 pandas.options.mode.copy_on_write = True
 pandas.options.future.infer_string = True  # type: ignore
+
+
+seaborn.set_theme(font_scale=1.2)
 
 
 def join_cameras(data: pandas.DataFrame):
@@ -95,7 +102,36 @@ def collect_bench_temps(data: pandas.DataFrame):
     return data
 
 
-def analyse_focus_sweeps(data: pandas.DataFrame):
+def fit_data(data: pandas.DataFrame):
+    """Fits a focus sweep and returns the best focus position."""
+
+    data.sort_values("focusdt", inplace=True)
+
+    x = data.focusdt.to_numpy()
+    y = data.fwhm.to_numpy()
+    spline, _ = fit_spline(x, y)
+
+    x_refine = numpy.arange(numpy.min(x), numpy.max(x), 0.01)
+    y_refine = spline(x_refine)
+
+    arg_min = numpy.argmin(y_refine)
+    xmin = x_refine[arg_min]
+    ymin = y_refine[arg_min]
+
+    df = pandas.DataFrame(
+        {
+            "focusdt": [xmin],
+            "fwhm": [ymin],
+            "benchi_temp": [data.benchi_temp.mean()],
+            "bencho_temp": [data.bencho_temp.mean()],
+        },
+        # dtype="float32[pyarrow]",
+    )
+
+    return df
+
+
+def analyse_focus_sweeps(data: pandas.DataFrame, output_parent: pathlib.Path):
     """Fits focus sweeps and plots results."""
 
     data = data.where(
@@ -107,16 +143,47 @@ def analyse_focus_sweeps(data: pandas.DataFrame):
 
     data = data.groupby(["telescope", "group"]).filter(lambda x: len(x) > 5)
 
-    best_foc = data.groupby(["telescope", "group"]).apply(
-        lambda x: x.loc[x.fwhm.idxmin()],
-        include_groups=False,
+    best_foc = (
+        data.groupby(["telescope", "group"])
+        .apply(
+            lambda x: fit_data(x),
+            include_groups=False,
+        )
+        .reset_index()
     )
-    best_sci = best_foc.loc["sci", :]
-    plt.plot(best_sci.benchi_temp, best_sci.focusdt, "o")
+
+    for bench in ["benchi_temp", "bencho_temp"]:
+        data_bench = best_foc.loc[~best_foc[bench].isna()]
+
+        fg = seaborn.lmplot(
+            data=data_bench,
+            x=bench,
+            y="focusdt",
+            hue="telescope",
+            legend=False,
+        )
+        fg.fig.set_figheight(6)
+        fg.fig.set_figwidth(10)
+        fg.fig.axes[0].legend(loc="upper left")
+
+        fg.fig.savefig(output_parent / f"focusdt_vs_{bench}.pdf")
+
+        print(bench)
+        print("-" * len(bench))
+
+        for tel in ["sci", "spec", "skye", "skyw"]:
+            data_tel = data_bench.loc[best_foc.telescope == tel]
+            if len(data_tel) == 0:
+                continue
+
+            a, b, r, _, _ = scipy.stats.linregress(data_tel[bench], data_tel.focusdt)
+            print(f"{tel}: a={a:.4f}, b={b:.3f}, r2={r**2:.2f}")
+
+        print()
 
 
 if __name__ == "__main__":
-    DATA_FILE = pathlib.Path("~/downloads/agcam/agcam_frames.parquet")
+    DATA_FILE = pathlib.Path("~/Downloads/agcam/agcam_frames.parquet").expanduser()
     # data = pandas.read_parquet(DATA_FILE, dtype_backend="pyarrow")
 
     DATA_SW_FILE = DATA_FILE.parent / "agcam_focus_sweeps.parquet"
@@ -126,4 +193,4 @@ if __name__ == "__main__":
     # data_sw = collect_bench_temps(data_sw)
     # data_sw.to_parquet(DATA_SW_FILE)
 
-    analyse_focus_sweeps(pandas.read_parquet(DATA_SW_FILE))
+    analyse_focus_sweeps(pandas.read_parquet(DATA_SW_FILE), DATA_FILE.parent)
