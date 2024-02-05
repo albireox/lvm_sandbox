@@ -11,6 +11,8 @@ from __future__ import annotations
 import pathlib
 
 import pandas
+from astropy.io import fits
+from matplotlib import pyplot as plt
 
 
 pandas.options.mode.copy_on_write = True
@@ -67,12 +69,61 @@ def filter_focus_sweeps(data: pandas.DataFrame):
         data_sw = data_sw.groupby("group").filter(lambda x: len(x) > 5)
         data_sws.append(data_sw)
 
-    return pandas.concat(data_sws, axis=1, ignore_index=True)
+    return pandas.concat(data_sws, axis=0, ignore_index=True)
+
+
+def collect_bench_temps(data: pandas.DataFrame):
+    """Collect bench temperatures from the AG headers."""
+
+    data["benchi_temp"] = pandas.Series([], dtype="float32[pyarrow]")
+    data["bencho_temp"] = pandas.Series([], dtype="float32[pyarrow]")
+
+    for idx, row in data.iterrows():
+        ag_file = pathlib.Path(
+            f"/data/agcam/{row.mjd}/"
+            f"lvm.{row.telescope}.agcam.east_{row.frameno:08d}.fits"
+        )
+        if not ag_file.exists():
+            continue
+
+        header = fits.getheader(ag_file, 1)
+        if "BENTEMPI" in header:
+            data.at[idx, "benchi_temp"] = header["BENTEMPI"]
+        if "BENTEMPO" in header:
+            data.at[idx, "bencho_temp"] = header["BENTEMPO"]
+
+    return data
+
+
+def analyse_focus_sweeps(data: pandas.DataFrame):
+    """Fits focus sweeps and plots results."""
+
+    data = data.where(
+        ~(data.benchi_temp.isna() | (data.benchi_temp < -100))
+        | ~(data.bencho_temp.isna() | (data.bencho_temp < -100))
+    )
+    data.loc[data.benchi_temp < -100, "benchi_temp"] = pandas.NA
+    data.loc[data.bencho_temp < -100, "bencho_temp"] = pandas.NA
+
+    data = data.groupby(["telescope", "group"]).filter(lambda x: len(x) > 5)
+
+    best_foc = data.groupby(["telescope", "group"]).apply(
+        lambda x: x.loc[x.fwhm.idxmin()],
+        include_groups=False,
+    )
+    best_sci = best_foc.loc["sci", :]
+    plt.plot(best_sci.benchi_temp, best_sci.focusdt, "o")
 
 
 if __name__ == "__main__":
-    DATA_FILE = pathlib.Path("~/Downloads/agcam/agcam_frames.parquet")
-    data = pandas.read_parquet(DATA_FILE, dtype_backend="pyarrow")
+    DATA_FILE = pathlib.Path("~/downloads/agcam/agcam_frames.parquet")
+    # data = pandas.read_parquet(DATA_FILE, dtype_backend="pyarrow")
 
-    data_sw = filter_focus_sweeps(data)
-    data_sw.to_parquet(DATA_FILE.parent / "agcam_focus_sweeps.parquet")
+    DATA_SW_FILE = DATA_FILE.parent / "agcam_focus_sweeps.parquet"
+    # data_sw = filter_focus_sweeps(data)
+    # data_sw.to_parquet(DATA_SW_FILE)
+
+    # data_sw = collect_bench_temps(data_sw)
+    # data_sw.to_parquet(DATA_SW_FILE)
+
+    analyse_focus_sweeps(pandas.read_parquet(DATA_SW_FILE))
