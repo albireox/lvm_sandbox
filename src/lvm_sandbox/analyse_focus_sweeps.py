@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import pathlib
+import warnings
 
 import numpy
 import pandas
@@ -109,7 +110,10 @@ def fit_data(data: pandas.DataFrame):
 
     x = data.focusdt.to_numpy()
     y = data.fwhm.to_numpy()
-    spline, _ = fit_spline(x, y)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        spline, _ = fit_spline(x, y)
 
     x_refine = numpy.arange(numpy.min(x), numpy.max(x), 0.01)
     y_refine = spline(x_refine)
@@ -125,7 +129,7 @@ def fit_data(data: pandas.DataFrame):
             "benchi_temp": [data.benchi_temp.mean()],
             "bencho_temp": [data.bencho_temp.mean()],
         },
-        # dtype="float32[pyarrow]",
+        dtype="float32[pyarrow]",
     )
 
     return df
