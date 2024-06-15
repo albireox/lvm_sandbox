@@ -1,3 +1,3 @@
-# fps_sandbox
+# lvm_sandbox
 
-Tools for FPS testing
+Scripts, tests, and analysis for LVM data and infrastructure.
