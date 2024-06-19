@@ -43,13 +43,14 @@ OUTPUTS = CWD / "outputs"
 
 def compare_nominal_to_self_calibration(
     hobject: PathType,
-    profile: str | None = None,
+    database_profile: str | None = None,
+    connection_string: str | None = None,
     nstar_limit: int = 20,
     gmag_limit: float = 15.0,
     max_sep: float = 7.0,
     skip_if_no_fluxcal: bool = False,
     reject_multiple_per_fibre: bool | Literal["keep_brightest"] = True,
-    output_path: PathType | None = None,
+    output_path: PathType = OUTPUTS,
 ):
     """Compares the standards sensitivity function to one derived from field stars.
 
@@ -60,12 +61,35 @@ def compare_nominal_to_self_calibration(
         file, after flux calibration has been performed and the sensitivity functions
         have been added to the ``FLUXCAL`` extension, but before the flux calibration
         has been applied to the data (the ``lvmFFrame`` file).
+    database_profile
+        The database profile to use.
+    connection_string
+        A connection string in the form ``postgres://user:password@host:port/database``.
+        Takes preference over ``database_profile``.
+    nstar_limit
+        The maximum number of stars to use for the calibration. This limit is only
+        applied after all other filters have been applied.
+    gmag_limit
+        The limit in G magnitude for the Gaia sources. If ``None``, no limit is applied.
+    max_sep
+        The maximum separation to a fibre centre, in arcsec, to consider a star
+        as a calibration source.
+    skip_if_no_fluxcal
+        If the ``hobject`` file does not contain a ``FLUXCAL`` extension, returns
+        with a warning. Otherwise calculates the self-calibration but does not
+        compare it to the nominal calibration.
+    reject_multiple_per_fibre
+        If ``True``, rejects all stars that fall on the same fibre as another star.
+        ``False`` will consider all the stars valid. If ``keep_brightest``, fibres with
+        more than one star will keep the brightest one in the G band.
+    output_path
+        The directory where to save the plots and parquet files.
 
     """
 
     hobject = pathlib.Path(hobject)
 
-    output_path = pathlib.Path(output_path) if output_path else OUTPUTS
+    output_path = pathlib.Path(output_path)
     output_path.mkdir(exist_ok=True, parents=True)
 
     hdul = fits.open(hobject)
@@ -73,8 +97,8 @@ def compare_nominal_to_self_calibration(
     wave = get_wavelength_array_from_header(hdul[0].header)
 
     # Connect to operations database.
-    if profile:
-        database.set_profile(profile)
+    if database_profile:
+        database.set_profile(database_profile)
 
     assert database.connected, "Database is not connected."
 
@@ -130,7 +154,7 @@ def compare_nominal_to_self_calibration(
     ### Get the sensitivity functions for field stars. ###
     df_self = flux_calibration_self(
         hobject,
-        database,
+        connection=connection_string or database,
         plot=True,
         plot_dir=output_path,
         gmag_limit=gmag_limit,
