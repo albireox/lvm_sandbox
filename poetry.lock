@@ -996,7 +996,7 @@ seaborn = ">=0.12.0"
 
 [package.source]
 type = "directory"
-url = "../../albireox/gtools"
+url = "../gtools"
 
 [[package]]
 name = "h11"

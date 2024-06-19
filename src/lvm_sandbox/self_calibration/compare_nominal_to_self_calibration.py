@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import pathlib
 import re
@@ -26,19 +27,20 @@ from gtools.lvm.pipe.flux_calibration import (
     flux_calibration_self,
     get_mean_sensitivity_response,
 )
-from gtools.lvm.pipe.flux_calibration import (
-    log as flux_calibration_log,
-)
-from gtools.lvm.pipe.tools import get_wavelength_array_from_header
+from gtools.lvm.pipe.tools import fframe_to_hobject, get_wavelength_array_from_header
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from sdssdb.peewee.sdss5db import database
+
+from sdsstools import get_logger
 
 
 PathType = os.PathLike | str | pathlib.Path
 
 CWD = pathlib.Path(__file__).parent
 OUTPUTS = CWD / "outputs"
+
+log = get_logger("lvm_sandbox.self_calibration.compare_nominal_to_self_calibration")
 
 
 def compare_nominal_to_self_calibration(
@@ -51,6 +53,7 @@ def compare_nominal_to_self_calibration(
     skip_if_no_fluxcal: bool = False,
     reject_multiple_per_fibre: bool | Literal["keep_brightest"] = True,
     output_path: PathType = OUTPUTS,
+    write_log: bool = True,
 ):
     """Compares the standards sensitivity function to one derived from field stars.
 
@@ -84,6 +87,8 @@ def compare_nominal_to_self_calibration(
         more than one star will keep the brightest one in the G band.
     output_path
         The directory where to save the plots and parquet files.
+    write_log
+        If ``True``, writes a log file with the output of the function.
 
     """
 
@@ -112,14 +117,14 @@ def compare_nominal_to_self_calibration(
 
         if numpy.isnan(mean_fluxcal).all():
             if skip_if_no_fluxcal:
-                flux_calibration_log.warning("FLUXCAL contains only NaN values.")
+                log.warning("FLUXCAL contains only NaN values.")
                 return
 
             has_fluxcal = False
 
     else:
         if skip_if_no_fluxcal:
-            flux_calibration_log.warning("FLUXCAL extension not found.")
+            log.warning("FLUXCAL extension not found.")
             return
 
         mean_fluxcal = numpy.full_like(wave, numpy.nan)
@@ -161,6 +166,8 @@ def compare_nominal_to_self_calibration(
         nstar_limit=nstar_limit,
         max_sep=max_sep,
         reject_multiple_per_fibre=reject_multiple_per_fibre,
+        silent=write_log,
+        write_log=write_log,
     )
     sens_mean_self, sens_rms_self = get_mean_sensitivity_response(df_self)
 
@@ -246,13 +253,13 @@ def compare_nominal_to_self_calibration(
 
 def create_file_list(
     root: PathType,
-    pattern: str = "**/ancillary/lvm-hobject-*.fits",
+    pattern: str = "**/lvmFFrame*.fits",
     max_mjd=60384,
     reject_tile_ids=[11111],
-    reject_no_astro: bool = True,
+    reject_no_astro: bool = False,
     outpath: str | None = None,
 ) -> dict[str, list[str]]:
-    """Returns a list of hobject files matching the pattern in the root directory."""
+    """Returns a list of files matching the pattern in the root directory."""
 
     root = pathlib.Path(root)
     files = root.glob(pattern)
@@ -295,51 +302,127 @@ def create_file_list(
 def process_file_list(
     tree_file: dict[str, list[str]] | PathType,
     output_path: PathType | None = None,
+    processes: int = 5,
+    limit: int | None = None,
+    randomise: bool = True,
+    skip_if_exists: bool = False,
     **kwargs,
 ):
     """Processes the list of files."""
 
+    numpy.random.seed(42)
+
     if not isinstance(tree_file, dict):
         with open(tree_file, "r") as f:
             tree = json.load(f)
-        log_file = pathlib.Path(tree_file).name
     else:
         tree = tree_file
-        log_file = "log"
 
-    flux_calibration_log.sh.setLevel(5)
-    flux_calibration_log.start_file_logger(
-        str(OUTPUTS / f"{log_file}.log"),
-        mode="w",
-        rotating=False,
-    )
+    log.sh.setLevel(10)
 
-    ndir = len(tree)
+    if limit:
+        ndir = limit
+    else:
+        ndir = len(tree)
 
-    for nn, dir in enumerate(sorted(tree.keys())):
-        flux_calibration_log.info(f"Processing {dir} ({nn+1} / {ndir}) ...")
+    dirs = list(sorted(tree.keys()))
+    if limit is not None and randomise:
+        numpy.random.shuffle(dirs)
+
+    for nn, dir in enumerate(dirs):
+        if limit and nn >= limit:
+            break
+
+        log.info(f"Processing {dir} ({nn+1} / {ndir}) ...")
 
         path = pathlib.Path(dir)
-        chunks = list(path.parts[-5:-1])
+        chunks = list(path.parts[-4:])
 
         partial_call = partial(
-            compare_nominal_to_self_calibration,
+            _process_file,
             skip_if_no_fluxcal=True,
             output_path=(output_path or OUTPUTS) / pathlib.Path(*chunks),
             **kwargs,
         )
 
-        hobjects = [pathlib.Path(dir) / file for file in tree[dir]]
-        for hobject in hobjects:
-            hdul = fits.open(hobject)
-            if "ra" not in hdul["SLITMAP"].data.dtype.names:
-                continue
+        files = [pathlib.Path(dir) / file for file in tree[dir]]
 
-            try:
-                partial_call(hobject)
-            except Exception as ee:
-                flux_calibration_log.error(f"Error processing {hobject}: {ee}")
+        if processes == 1:
+            for file in files:
+                partial_call(file)
+
+        else:
+            with multiprocessing.Pool(processes) as pool:
+                pool.map(partial_call, files)
 
 
-if __name__ == "__man__":
-    pass
+def _process_file(
+    file: PathType,
+    skip_if_exists: bool = False,
+    output_path: PathType = OUTPUTS,
+    **kwargs,
+):
+    file = pathlib.Path(file)
+    output_path = pathlib.Path(output_path)
+
+    try:
+        header = fits.getheader(file, 0)
+
+        if header["EXPTIME"] < 600:
+            raise ValueError(f"{file.name}: exposure time is less than 600s.")
+        elif header["IMAGETYP"] != "object":
+            raise ValueError(f"{file.name}: IMAGETYPE is not 'object'.")
+        elif "TILE_ID" not in header or header["TILE_ID"] is None:
+            raise ValueError(f"{file.name}: TILE_ID is None.")
+
+        if "lvmFFrame" in file.name:
+            hobject_fn = file.name.replace("lvmFFrame", "lvm-hobject")
+
+            if (output_path / hobject_fn).exists() and skip_if_exists:
+                log.info(f"Skipping {file.name} as {hobject_fn} already exists.")
+                return
+
+            log.info(f"Converting {file.name} to {hobject_fn} ...")
+            fframe_to_hobject(file, output_path / hobject_fn)
+
+            file = output_path / hobject_fn
+
+        if file.exists() and skip_if_exists:
+            log.info(f"Skipping {file.name} as it already exists.")
+            return
+
+        compare_nominal_to_self_calibration(
+            file,
+            output_path=output_path,
+            **kwargs,
+        )
+    except Exception as ee:
+        log.error(f"Error processing {file}: {ee}")
+
+
+if __name__ == "__main__":
+    REDUX_DIR = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/lvm/spectro/redux"
+    REDUX_1_0_3 = f"{REDUX_DIR}/1.0.3"
+
+    PROJECTS = "/uufs/chpc.utah.edu/common/home/u0931042/sdss09/projects"
+    OUTPUT_PATH = f"{PROJECTS}/lvm/self_calibration/"
+    TREE_FILE = f"{OUTPUT_PATH}/fframe_files.json"
+
+    # TREE_FILE = {
+    #     f"{SPECTRO_1_0_3}/1044XX/1044501/60370": [
+    #         "lvmFFrame-b-00013403.fits",
+    #         "lvmFFrame-r-00013403.fits",
+    #         "lvmFFrame-z-00013403.fits",
+    #     ]
+    # }
+
+    process_file_list(
+        TREE_FILE,
+        output_path=OUTPUT_PATH,
+        limit=50,
+        processes=5,
+        connection_string="postgresql://sdss_user@localhost:5432/sdss5db",
+        nstar_limit=20,
+        reject_multiple_per_fibre="keep_brightest",
+        max_sep=8.0,
+    )
