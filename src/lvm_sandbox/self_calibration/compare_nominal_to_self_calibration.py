@@ -48,7 +48,7 @@ def compare_nominal_to_self_calibration(
     gmag_limit: float = 15.0,
     max_sep: float = 7.0,
     skip_if_no_fluxcal: bool = False,
-    reject_multiple_per_fibre: bool | Literal["keep_brightest"] = "keep_brightest",
+    reject_multiple_per_fibre: bool | Literal["keep_brightest"] = True,
     output_path: PathType | None = None,
 ):
     """Compares the standards sensitivity function to one derived from field stars.
