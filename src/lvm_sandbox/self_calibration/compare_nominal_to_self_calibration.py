@@ -8,8 +8,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
+import re
+from functools import partial
 
 from typing import Literal
 
@@ -23,6 +26,9 @@ from gtools.lvm.pipe.flux_calibration import (
     flux_calibration_self,
     get_mean_sensitivity_response,
 )
+from gtools.lvm.pipe.flux_calibration import (
+    log as flux_calibration_log,
+)
 from gtools.lvm.pipe.tools import get_wavelength_array_from_header
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
@@ -32,15 +38,16 @@ from sdssdb.peewee.sdss5db import database
 PathType = os.PathLike | str | pathlib.Path
 
 CWD = pathlib.Path(__file__).parent
-OUTPUTS = CWD / "outputs/compare_nominal_to_self_calibration"
+OUTPUTS = CWD / "outputs"
 
 
 def compare_nominal_to_self_calibration(
     hobject: PathType,
+    profile: str | None = None,
     nstar_limit: int = 20,
     gmag_limit: float = 15.0,
     max_sep: float = 7.0,
-    raise_if_no_fluxcal: bool = False,
+    skip_if_no_fluxcal: bool = False,
     reject_multiple_per_fibre: bool | Literal["keep_brightest"] = "keep_brightest",
     output_path: PathType | None = None,
 ):
@@ -59,14 +66,17 @@ def compare_nominal_to_self_calibration(
     hobject = pathlib.Path(hobject)
 
     output_path = pathlib.Path(output_path) if output_path else OUTPUTS
-    OUTPUTS.mkdir(exist_ok=True, parents=True)
+    output_path.mkdir(exist_ok=True, parents=True)
 
     hdul = fits.open(hobject)
 
     wave = get_wavelength_array_from_header(hdul[0].header)
 
     # Connect to operations database.
-    database.set_profile("tunnel_operations")
+    if profile:
+        database.set_profile(profile)
+
+    assert database.connected, "Database is not connected."
 
     ### Calculate mean sensitivity from FLUXCAL extension. ###
     if has_fluxcal := ("FLUXCAL" in hdul):
@@ -77,14 +87,16 @@ def compare_nominal_to_self_calibration(
         rms_fluxcal = biweight_scale(fluxcal, axis=1, ignore_nan=True)
 
         if numpy.isnan(mean_fluxcal).all():
-            if raise_if_no_fluxcal:
-                raise ValueError("FLUXCAL contains only NaN values.")
-            else:
-                has_fluxcal = False
+            if skip_if_no_fluxcal:
+                flux_calibration_log.warning("FLUXCAL contains only NaN values.")
+                return
+
+            has_fluxcal = False
 
     else:
-        if raise_if_no_fluxcal:
-            raise ValueError("FLUXCAL extension not found.")
+        if skip_if_no_fluxcal:
+            flux_calibration_log.warning("FLUXCAL extension not found.")
+            return
 
         mean_fluxcal = numpy.full_like(wave, numpy.nan)
         rms_fluxcal = numpy.full_like(wave, numpy.nan)
@@ -120,7 +132,7 @@ def compare_nominal_to_self_calibration(
         hobject,
         database,
         plot=True,
-        plot_dir=OUTPUTS,
+        plot_dir=output_path,
         gmag_limit=gmag_limit,
         nstar_limit=nstar_limit,
         max_sep=max_sep,
@@ -132,10 +144,14 @@ def compare_nominal_to_self_calibration(
     seaborn.set_theme(context="paper", style="ticks", font_scale=0.8)
 
     with plt.ioff():
-        fig, axes = plt.subplots(2, height_ratios=[4, 1], sharex=True)
-        fig.subplots_adjust(hspace=0)
+        if has_fluxcal:
+            fig, axes = plt.subplots(2, height_ratios=[4, 1], sharex=True)
+            fig.subplots_adjust(hspace=0)
 
-        ax_sens: Axes = axes[0]
+            ax_sens: Axes = axes[0]
+        else:
+            fig, ax_sens = plt.subplots()
+
         ax_sens.plot(
             wave,
             sens_mean_self,
@@ -165,41 +181,141 @@ def compare_nominal_to_self_calibration(
 
         ax_sens.legend()
 
-        ax_res: Axes = axes[1]
         if has_fluxcal:
+            ax_res: Axes = axes[1]
+
             ax_res.plot(wave, sens_mean_self / mean_fluxcal, color="k", lw=0.8)
 
-        ax_res.axhline(1.1, 0, 1, color="0.3", linestyle="dashed", lw=0.5)
-        ax_res.axhline(0.9, 0, 1, color="0.3", linestyle="dashed", lw=0.5)
+            ax_res.axhline(1.1, 0, 1, color="0.3", linestyle="dashed", lw=0.5)
+            ax_res.axhline(0.9, 0, 1, color="0.3", linestyle="dashed", lw=0.5)
 
-        # Labels and aesthetics
-        ax_sens.set_ylabel("Sensitivity response (XP / instrumental)")
+            ax_res.set_xlabel("Wavelength [A]")
+            ax_res.set_ylabel("Self / nominal")
 
-        ax_res.set_xlabel("Wavelength [A]")
-        ax_res.set_ylabel("Self / nominal")
+            # Remove the first y-tick label to avoid overlap with the second axis.
+            y_ticks = ax_sens.yaxis.get_major_ticks()
+            y_ticks[0].label1.set_visible(False)
 
-        ax_sens.set_title(hobject.name)
-
-        # Remove the first y-tick label to avoid overlap with the second axis.
-        y_ticks = ax_sens.yaxis.get_major_ticks()
-        y_ticks[0].label1.set_visible(False)
-
-        if has_fluxcal:
             ax_sens.set_ylim(
                 min(mean_fluxcal.min(), sens_mean_self.min()) * 0.8,
                 max(mean_fluxcal.max(), sens_mean_self.max()) * 1.1,
             )
+
         else:
             ax_sens.set_ylim(sens_mean_self.min() * 0.8, sens_mean_self.max() * 1.1)
 
-        fig.savefig(OUTPUTS / f"{hobject.stem}_sensitivity_comparison.pdf")
+        ax_sens.set_ylabel("Sensitivity response (XP / instrumental)")
+        ax_sens.set_title(hobject.name)
+
+        fig.savefig(output_path / f"{hobject.stem}_sensitivity_comparison.pdf")
 
     # Save files.
     hobject_lit = polars.lit(str(hobject.absolute()), dtype=polars.String)
 
     if has_fluxcal:
         fluxcal = fluxcal.with_columns(hobject=hobject_lit)
-        fluxcal.write_parquet(OUTPUTS / f"{hobject.stem}_fluxcal.parquet")
+        fluxcal.write_parquet(output_path / f"{hobject.stem}_fluxcal.parquet")
 
     df_self = df_self.with_columns(hobject=hobject_lit)
-    df_self.write_parquet(OUTPUTS / f"{hobject.stem}_self.parquet")
+    df_self.write_parquet(output_path / f"{hobject.stem}_self.parquet")
+
+
+def create_file_list(
+    root: PathType,
+    pattern: str = "**/ancillary/lvm-hobject-*.fits",
+    max_mjd=60384,
+    reject_tile_ids=[11111],
+    reject_no_astro: bool = True,
+    outpath: str | None = None,
+) -> dict[str, list[str]]:
+    """Returns a list of hobject files matching the pattern in the root directory."""
+
+    root = pathlib.Path(root)
+    files = root.glob(pattern)
+
+    tree: dict[str, list[str]] = {}
+
+    for file in files:
+        dir = str(file.absolute().parent)
+        filename = file.name
+
+        match = re.match(r"^.+?/[0-9]{4}XX/([0-9]+)/([0-9]+)", dir)
+        if not match:
+            raise ValueError(f"Could not extract tile and mjd from {dir}.")
+
+        tile_id = int(match.group(1))
+        mjd = int(match.group(2))
+
+        if (max_mjd and mjd > max_mjd) or tile_id in reject_tile_ids:
+            continue
+
+        if reject_no_astro:
+            hdul = fits.open(file)
+            if "ra" not in hdul["SLITMAP"].data.dtype.names:
+                continue
+
+        if dir in tree:
+            tree[dir].append(filename)
+        else:
+            tree[dir] = [filename]
+
+    OUTPUTS.mkdir(exist_ok=True, parents=True)
+    outpath = str(OUTPUTS / (outpath or "hobject_files.json"))
+
+    with open(outpath, "w") as f:
+        f.write(json.dumps(tree, indent=2))
+
+    return tree
+
+
+def process_file_list(
+    tree_file: dict[str, list[str]] | PathType,
+    output_path: PathType | None = None,
+    **kwargs,
+):
+    """Processes the list of files."""
+
+    if not isinstance(tree_file, dict):
+        with open(tree_file, "r") as f:
+            tree = json.load(f)
+        log_file = pathlib.Path(tree_file).name
+    else:
+        tree = tree_file
+        log_file = "log"
+
+    flux_calibration_log.sh.setLevel(5)
+    flux_calibration_log.start_file_logger(
+        str(OUTPUTS / f"{log_file}.log"),
+        mode="w",
+        rotating=False,
+    )
+
+    ndir = len(tree)
+
+    for nn, dir in enumerate(sorted(tree.keys())):
+        flux_calibration_log.info(f"Processing {dir} ({nn+1} / {ndir}) ...")
+
+        path = pathlib.Path(dir)
+        chunks = list(path.parts[-5:-1])
+
+        partial_call = partial(
+            compare_nominal_to_self_calibration,
+            skip_if_no_fluxcal=True,
+            output_path=(output_path or OUTPUTS) / pathlib.Path(*chunks),
+            **kwargs,
+        )
+
+        hobjects = [pathlib.Path(dir) / file for file in tree[dir]]
+        for hobject in hobjects:
+            hdul = fits.open(hobject)
+            if "ra" not in hdul["SLITMAP"].data.dtype.names:
+                continue
+
+            try:
+                partial_call(hobject)
+            except Exception as ee:
+                flux_calibration_log.error(f"Error processing {hobject}: {ee}")
+
+
+if __name__ == "__man__":
+    pass
