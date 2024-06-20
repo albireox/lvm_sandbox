@@ -51,7 +51,8 @@ def compare_nominal_to_self_calibration(
     gmag_limit: float = 15.0,
     max_sep: float = 7.0,
     skip_if_no_fluxcal: bool = False,
-    reject_multiple_per_fibre: bool | Literal["keep_brightest"] = True,
+    reject_multiple_per_fibre: bool | Literal["keep_brightest", "keep_hottest"] = True,
+    smooth_flux: bool = False,
     output_path: PathType = OUTPUTS,
     write_log: bool = False,
 ):
@@ -84,7 +85,12 @@ def compare_nominal_to_self_calibration(
     reject_multiple_per_fibre
         If ``True``, rejects all stars that fall on the same fibre as another star.
         ``False`` will consider all the stars valid. If ``keep_brightest``, fibres with
-        more than one star will keep the brightest one in the G band.
+        more than one star will keep the brightest one in the G band. If
+        ``keep_hottest`` will keep the stars with the highest ``teff_gspphot``.
+    smooth_flux
+        If ``True``, the corrected LVM flux is smoothed before calculating the
+        sensitivity function. Otherwise the sensitivity function is calculated
+        from the unsmoothed flux and then the sensitivity function is smoothed.
     output_path
         The directory where to save the plots and parquet files.
     write_log
@@ -166,6 +172,7 @@ def compare_nominal_to_self_calibration(
         nstar_limit=nstar_limit,
         max_sep=max_sep,
         reject_multiple_per_fibre=reject_multiple_per_fibre,
+        smooth_flux=smooth_flux,
         silent=write_log,
         write_log=write_log,
     )
@@ -344,6 +351,7 @@ def process_file_list(
             _process_file,
             skip_if_no_fluxcal=True,
             output_path=(output_path or OUTPUTS) / pathlib.Path(*chunks),
+            skip_if_exists=skip_if_exists,
             **kwargs,
         )
 
@@ -362,6 +370,7 @@ def _process_file(
     file: PathType,
     skip_if_exists: bool = False,
     output_path: PathType = OUTPUTS,
+    delete_hobject: bool = False,
     **kwargs,
 ):
     file = pathlib.Path(file)
@@ -396,8 +405,16 @@ def _process_file(
         compare_nominal_to_self_calibration(
             file,
             output_path=output_path,
+            write_log=True,
             **kwargs,
         )
+
+        if delete_hobject:
+            if "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork" in str(file.parent):
+                log.warning(f"Cannot delete file {file!s} from sdsswork.")
+            else:
+                file.unlink()
+
     except Exception as ee:
         log.error(f"Error processing {file}: {ee}")
 
@@ -406,8 +423,10 @@ if __name__ == "__main__":
     REDUX_DIR = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/lvm/spectro/redux"
     REDUX_1_0_3 = f"{REDUX_DIR}/1.0.3"
 
+    TEST_NO = "test7"
+
     PROJECTS = "/uufs/chpc.utah.edu/common/home/u0931042/sdss09/projects"
-    OUTPUT_PATH = f"{PROJECTS}/lvm/self_calibration/"
+    OUTPUT_PATH = f"{PROJECTS}/lvm/self_calibration/{TEST_NO}"
     TREE_FILE = f"{OUTPUT_PATH}/fframe_files.json"
 
     # TREE_FILE = {
@@ -421,10 +440,13 @@ if __name__ == "__main__":
     process_file_list(
         TREE_FILE,
         output_path=OUTPUT_PATH,
-        limit=50,
+        limit=15,
         processes=5,
         connection_string="postgresql://sdss_user@localhost:5432/sdss5db",
         nstar_limit=20,
-        reject_multiple_per_fibre="keep_brightest",
-        max_sep=8.0,
+        gmag_limit=15.0,
+        reject_multiple_per_fibre=False,
+        max_sep=10.0,
+        smooth_flux=True,
+        delete_hobject=True,
     )
