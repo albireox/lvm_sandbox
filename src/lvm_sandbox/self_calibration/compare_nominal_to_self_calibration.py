@@ -53,7 +53,7 @@ def compare_nominal_to_self_calibration(
     skip_if_no_fluxcal: bool = False,
     reject_multiple_per_fibre: bool | Literal["keep_brightest"] = True,
     output_path: PathType = OUTPUTS,
-    write_log: bool = True,
+    write_log: bool = False,
 ):
     """Compares the standards sensitivity function to one derived from field stars.
 
@@ -169,6 +169,8 @@ def compare_nominal_to_self_calibration(
         silent=write_log,
         write_log=write_log,
     )
+    df_self.write_parquet(output_path / f"{hobject.stem}_self.parquet")
+
     sens_mean_self, sens_rms_self = get_mean_sensitivity_response(df_self)
 
     ### Plot the mean sensitivity functions and residuals. ###

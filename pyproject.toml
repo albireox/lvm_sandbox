@@ -15,7 +15,7 @@ seaborn = ">=0.12.0"
 sdsstools = "^1.1.0"
 lvmgort = ">=0.11.0"
 lvmguider = { git = "https://github.com/sdss/lvmguider.git", branch = "main" }
-polars = "^0.20.10"
+polars = "^1.0.0b1"
 adbc-driver-postgresql = "^0.9.0"
 gtools = { path = '../gtools', develop = true }
 
