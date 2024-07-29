@@ -8,12 +8,12 @@ authors = ["José Sánchez-Gallego <gallegoj@uw.edu>"]
 python = ">=3.10,<3.13"
 astropy = "^6.0.0"
 pandas = "^2.0.0"
-numpy = "^1.21.1"
+numpy = ">=1.21.1"
 tables = ">=3.6.1"
 matplotlib = ">=3.5"
 seaborn = ">=0.12.0"
 sdsstools = "^1.1.0"
-lvmgort = ">=0.11.0"
+lvmgort = ">=1.0.0b1"
 lvmguider = { git = "https://github.com/sdss/lvmguider.git", branch = "main" }
 polars = "^1.0.0b1"
 adbc-driver-postgresql = "^0.9.0"
@@ -27,12 +27,12 @@ typing_extensions = {version="*", python="~3.7"}
 ipdb = ">=0.13.3"
 autopep8 = ">=1.5.4"
 pandas-stubs = ">=2.0.0"
-ruff = ">=0.0.284"
+ruff = ">=0.5.0"
 nptyping = ">=2.5.0"
 
 [tool.ruff]
 line-length = 88
-target-version = 'py311'
+target-version = 'py312'
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
