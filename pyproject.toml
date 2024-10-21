@@ -1,34 +1,45 @@
-[tool.poetry]
+[project]
 name = "lvm_sandbox"
 version = "0.1.0"
 description = "Sandbox for LVM scripts and tools."
-authors = ["José Sánchez-Gallego <gallegoj@uw.edu>"]
+authors = [
+    { name = "José Sánchez-Gallego", email = "gallegoj@uw.edu" }
+]
+license = { text = "BSD-3-Clause" }
+readme = "README.md"
+requires-python = ">=3.11,<4"
 
-[tool.poetry.dependencies]
-python = ">=3.10,<3.13"
-astropy = "^6.0.0"
-pandas = "^2.0.0"
-numpy = ">=1.21.1"
-tables = ">=3.6.1"
-matplotlib = ">=3.5"
-seaborn = ">=0.12.0"
-sdsstools = "^1.1.0"
-lvmgort = ">=1.0.0b1"
-lvmguider = { git = "https://github.com/sdss/lvmguider.git", branch = "main" }
-polars = "^1.0.0b1"
-adbc-driver-postgresql = "^0.9.0"
-gtools = { path = '../gtools', develop = true }
+dependencies = [
+    "astropy>=6.0.0",
+    "pandas>=2.0.0",
+    "tables>=3.6.1",
+    "matplotlib>=3.5",
+    "seaborn>=0.12.0",
+    "sdsstools>=1.1.0",
+    "lvmgort>=1.0.0b1",
+    "polars>=1.0.0",
+    "adbc-driver-postgresql>=0.9.0",
+    "lvmguider",
+    "gtools"
+]
 
-[tool.poetry.group.dev.dependencies]
-ipython = ">=8.0.0"
-invoke = "*"
-doc8 = ">=0.8.0"
-typing_extensions = {version="*", python="~3.7"}
-ipdb = ">=0.13.3"
-autopep8 = ">=1.5.4"
-pandas-stubs = ">=2.0.0"
-ruff = ">=0.5.0"
-nptyping = ">=2.5.0"
+[tool.uv]
+package = true
+dev-dependencies = [
+    "ipython>=8.0.0",
+    "invoke>=2.2.0",
+    "doc8>=0.8.0",
+    "typing_extensions>=4.12.2;python_version~='3.7'",
+    "ipdb>=0.13.3",
+    "autopep8>=1.5.4",
+    "pandas-stubs>=2.0.0",
+    "ruff>=0.5.0",
+    "nptyping>=2.5.0"
+]
+
+[tool.uv.sources]
+lvmguider = { git = "https://github.com/sdss/lvmguider", branch = "main" }
+gtools = { path = "../gtools" }
 
 [tool.ruff]
 line-length = 88
@@ -51,5 +62,5 @@ typing = ["typing"]
 sdss = ["sdsstools", "lvmguider", "lvmgort"]
 
 [build-system]
-requires = ["poetry-core>=1.1.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
