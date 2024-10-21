@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 
+import matplotlib
 import pandas
 import scipy.stats
 import seaborn
@@ -17,6 +18,7 @@ from influxdb_client import InfluxDBClient
 from matplotlib import pyplot as plt
 
 
+matplotlib.use("Agg")
 seaborn.set_theme()
 
 
@@ -80,7 +82,7 @@ def get_telescope_data(telescope: str, outpath: pathlib.Path):
 
     combined = combined.loc[combined["frame.fwhm"] < 3]
 
-    combined.to_hdf(str(outpath), "data")
+    combined.to_parquet(str(outpath))
 
     return combined
 
@@ -131,9 +133,9 @@ def focus_temperature():
     OUTPATH.mkdir(parents=True, exist_ok=True)
 
     for telescope in ["sci", "spec", "skyw", "skye"]:
-        data_path = OUTPATH / f"focus_temperature_{telescope}.h5"
+        data_path = OUTPATH / f"focus_temperature_{telescope}.parquet"
         if data_path.exists():
-            data = pandas.read_hdf(str(data_path))
+            data = pandas.read_parquet(str(data_path))
         else:
             data = get_telescope_data(telescope, data_path)
 
