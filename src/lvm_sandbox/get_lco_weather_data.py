@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import datetime
 
+import polars
 from lvmopstools.weather import get_weather_data
+from rich import print
 
 
 async def get_lco_weather_data(backdays: int = 360):
@@ -19,14 +21,19 @@ async def get_lco_weather_data(backdays: int = 360):
     current_date = datetime.datetime.now()
     start_date = current_date.date()
 
+    dfs: list[polars.DataFrame] = []
+
     for ii in range(backdays):
         time0 = start_date.strftime("%Y-%m-%dT00:00:00")
         time1 = start_date.strftime("%Y-%m-%dT23:59:59")
 
-        data = await get_weather_data(time0, time1)
-        print(data)
+        try:
+            data = await get_weather_data(time0, time1)
+            dfs.append(data)
+        except Exception:
+            print(f"[yellow]End of data reached at {start_date}.[/yellow]")
+            break
 
         start_date -= datetime.timedelta(days=1)
 
-        if ii == 5:
-            break
+    return polars.concat(dfs)
