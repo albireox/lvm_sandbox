@@ -20,7 +20,8 @@ dependencies = [
     "polars>=1.0.0",
     "adbc-driver-postgresql>=0.9.0",
     "lvmguider",
-    "gtools"
+    "gtools",
+    "lvmopstools>=0.5.7",
 ]
 
 [tool.uv]
