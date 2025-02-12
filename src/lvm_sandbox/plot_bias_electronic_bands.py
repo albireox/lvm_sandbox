@@ -11,7 +11,6 @@ from __future__ import annotations
 import pathlib
 import re
 
-import nptyping as npt
 import numpy
 import seaborn
 from astropy.io import fits
@@ -19,8 +18,6 @@ from matplotlib import pyplot as plt
 
 
 seaborn.set_theme(context="paper", style="ticks", font_scale=1.2)
-
-ARRAY_2D = npt.NDArray[npt.Shape["*,*"], npt.Float32]
 
 
 def plot_bias_electronic_bands(subtract_overscan: bool = True):
@@ -31,7 +28,7 @@ def plot_bias_electronic_bands(subtract_overscan: bool = True):
     for camera in ["r1", "r2", "r3", "b1", "b2", "b3", "z1", "z2", "z3"]:
         files = sorted(pathlib.Path(PATH).glob(f"sdR-s-{camera}-*.fits.gz"))
 
-        data: list[ARRAY_2D] = []
+        data: list[numpy.ndarray] = []
         framenos: list[int] = []
 
         for file in files:
@@ -39,7 +36,7 @@ def plot_bias_electronic_bands(subtract_overscan: bool = True):
             if not (match := re.match(rf"sdR-s-{camera}-(\d+).fits.gz", filename)):
                 continue
 
-            file_data: ARRAY_2D = fits.getdata(file).astype(numpy.float32)
+            file_data: numpy.ndarray = fits.getdata(file).astype(numpy.float32)
             file_data += numpy.random.uniform(0, 1e-3, file_data.shape)
 
             if subtract_overscan:

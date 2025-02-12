@@ -33,13 +33,12 @@ dev-dependencies = [
     "ipdb>=0.13.3",
     "autopep8>=1.5.4",
     "pandas-stubs>=2.0.0",
-    "ruff>=0.5.0",
-    "nptyping>=2.5.0"
+    "ruff>=0.5.0"
 ]
 
-[tool.uv.sources]
-lvmguider = { git = "https://github.com/sdss/lvmguider", branch = "main" }
-gtools = { path = "../gtools" }
+# [tool.uv.sources]
+# lvmguider = { git = "https://github.com/sdss/lvmguider", branch = "main" }
+# gtools = { path = "../gtools" }
 
 [tool.ruff]
 line-length = 88
