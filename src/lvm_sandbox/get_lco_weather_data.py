@@ -11,10 +11,13 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import pathlib
 
 import polars
+import seaborn
 from influxdb_client.client.influxdb_client import InfluxDBClient
 from lvmopstools.weather import get_weather_data
+from matplotlib import pyplot as plt
 from rich import print
 from rich.progress import track
 
@@ -97,3 +100,87 @@ async def get_lco_weather_data(backdays: int = 360):
                 return add_rain_sensor_data(polars.concat(dfs))
 
     return add_rain_sensor_data(polars.concat(dfs))
+
+
+def plot_weather_data(data: polars.DataFrame):
+    """Plots the weather data."""
+
+    OUTPATH = pathlib.Path(__file__).parent / "../../outputs/weather_plot"
+    OUTPATH.mkdir(exist_ok=True, parents=True)
+
+    seaborn.set_theme()
+    plt.ioff()
+
+    data = data.sort(polars.col.ts)
+    dates = data["ts"].dt.date().unique()
+
+    for date in dates:
+        data_ts = data.filter(polars.col.ts.dt.date() == date)
+        fig, axes = plt.subplots(3, 1, figsize=(18, 12))
+
+        axes[0].plot(
+            data_ts["ts"],
+            data_ts["wind_speed_avg"],
+            color="b",
+            alpha=0.5,
+            label="Wind speed avg.",
+            zorder=10,
+        )
+        axes[0].plot(
+            data_ts["ts"],
+            data_ts["wind_speed_avg_5m"],
+            color="r",
+            label="Wind speed avg. (5m)",
+            zorder=15,
+        )
+        axes[0].legend(loc="upper left")
+        axes[0].set_ylabel("Wind speed [mph]")
+
+        axes[1].plot(
+            data_ts["ts"],
+            data_ts["relative_humidity"],
+            color="b",
+            label="Relative humidity",
+            zorder=10,
+        )
+
+        rain = data_ts.filter(polars.col.rain)
+        if len(rain) > 5:
+            ylim1 = axes[1].get_ylim()
+            axes[1].fill_between(
+                data_ts["ts"],
+                ylim1[0],
+                ylim1[1],
+                where=(data_ts["rain"]),
+                color="r",
+                lw=0,
+                alpha=0.3,
+                zorder=5,
+                label="Rain",
+            )
+            axes[1].set_ylim(ylim1)
+
+        axes[1].legend(loc="upper left")
+        axes[1].set_ylabel("Relative humidity [%]")
+
+        axes[2].plot(
+            data_ts["ts"],
+            data_ts["temperature"] - data_ts["dew_point"],
+            color="b",
+            label="Temperature - dew point",
+        )
+
+        # Plot line at 0 delta temperature but preserve y limits.
+        ylim2 = axes[2].get_ylim()
+        axes[2].axhline(0, color="r", linestyle="--")
+        axes[2].set_ylim(ylim2)
+
+        axes[2].legend(loc="upper left")
+        axes[2].set_ylabel("Temperature - dew point [degC]")
+
+        axes[0].set_title(f"Weather data — {date.strftime('%Y-%m-%d')}", fontsize=16)
+
+        fig.tight_layout()
+        fig.savefig(OUTPATH / f"weather_{date.strftime('%Y-%m-%d')}.pdf")
+
+        plt.close("all")
