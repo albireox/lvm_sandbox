@@ -21,12 +21,11 @@ dependencies = [
     "adbc-driver-postgresql>=0.9.0",
     "lvmguider",
     "gtools",
-    "lvmopstools[all]>=0.5.7",
+    "lvmopstools[all]>=0.5.11",
 ]
 
-[tool.uv]
-package = true
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "ipython>=8.0.0",
     "invoke>=2.2.0",
     "doc8>=0.8.0",
@@ -36,6 +35,10 @@ dev-dependencies = [
     "pandas-stubs>=2.0.0",
     "ruff>=0.5.0"
 ]
+
+[tool.uv]
+package = true
+default-groups = "all"
 
 # [tool.uv.sources]
 # lvmguider = { git = "https://github.com/sdss/lvmguider", branch = "main" }
