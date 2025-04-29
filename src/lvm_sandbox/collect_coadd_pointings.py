@@ -39,11 +39,12 @@ DITHER_OFFSETS = {
 def get_rot_matrix(angle: float):
     """Returns a rotation matrix for the given angle in degrees."""
 
-    angle = angle * 3.141592653589793 / 180.0
-    cos_angle = numpy.cos(angle)
-    sin_angle = numpy.sin(angle)
-
-    return numpy.array([[cos_angle, -sin_angle], [sin_angle, cos_angle]])
+    return numpy.array(
+        [
+            [numpy.cos(-angle), -numpy.sin(-angle)],
+            [numpy.sin(-angle), numpy.cos(-angle)],
+        ]
+    )
 
 
 @lru_cache()
@@ -132,7 +133,7 @@ def collect_coadd_pointings():
         field_pa = header["PAFIELD"]
 
         dpos_offset = DITHER_OFFSETS[dpos]
-        rot_matrix = get_rot_matrix(-(field_pa or 0.0))
+        rot_matrix = get_rot_matrix(field_pa or 0.0)
 
         dpos_offset_pa = numpy.dot(rot_matrix, dpos_offset) / 3600
         ra_offset = field_ra - dpos_offset_pa[0] / numpy.cos(numpy.radians(field_dec))
