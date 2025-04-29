@@ -39,6 +39,7 @@ DITHER_OFFSETS = {
 def get_rot_matrix(angle: float):
     """Returns a rotation matrix for the given angle in degrees."""
 
+    angle = numpy.radians(angle)
     return numpy.array(
         [
             [numpy.cos(-angle), -numpy.sin(-angle)],
