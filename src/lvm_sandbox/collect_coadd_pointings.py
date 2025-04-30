@@ -15,11 +15,13 @@ from functools import lru_cache
 
 import numpy
 import polars
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.wcs import WCS
 from rich.progress import track
 
 
+OUTPUTS = pathlib.Path(__file__).parent / "../../outputs"
 AGCAM_ROOT = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/agcam/lco"
 SPECTRO_ROOT = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/lvm/spectro/data/lco/"
 
@@ -72,17 +74,12 @@ def get_coadd_images():
     return coadd_images
 
 
-def collect_coadd_pointings():
+def collect_coadd_pointings() -> polars.DataFrame:
     """Collects pointing data from the co-add images for the sci telescope."""
 
     print("Collecting co-add images ...")
     coadd_images = get_coadd_images()
-
-    output_file = "coadd_pointings.parquet"
-    if os.path.exists(output_file):
-        df = polars.read_parquet(output_file)
-    else:
-        df = None
+    tiles = polars.read_parquet(OUTPUTS / "lvm_tiles.parquet")
 
     new_data: list[dict] = []
     for coadd_image in track(coadd_images):
@@ -93,8 +90,6 @@ def collect_coadd_pointings():
             continue
 
         exposure_no = int(exposure_match.group(1))
-        if df is not None and (df["exposure_no"] == exposure_no).any():
-            continue
 
         spec_image_path = (
             pathlib.Path(SPECTRO_ROOT)
@@ -116,6 +111,11 @@ def collect_coadd_pointings():
         if tile_id is None or tile_id <= 0:
             continue
 
+        tile_data = tiles.filter(polars.col.tile_id == tile_id)
+        if tile_data.is_empty():
+            print("Unknown tile ID:", tile_id)
+            continue
+
         if "SMJD" not in spectro_header:
             continue
 
@@ -126,19 +126,26 @@ def collect_coadd_pointings():
 
         wcs = WCS(header)
         wcs_pointing = wcs.pixel_to_world(2500, 1000)
-        wcs_ra = float(wcs_pointing.ra.deg)
-        wcs_dec = float(wcs_pointing.dec.deg)
+        coadd_wcs_ra = float(wcs_pointing.ra.deg)
+        coadd_wcs_dec = float(wcs_pointing.dec.deg)
 
-        field_ra = header["RAFIELD"]
-        field_dec = header["DECFIELD"]
-        field_pa = header["PAFIELD"]
+        coadd_field_ra = header["RAFIELD"]
+        coadd_field_dec = header["DECFIELD"]
+        coadd_field_pa = header["PAFIELD"]
+
+        tile_ra = tile_data["ra"][0]
+        tile_dec = tile_data["dec"][0]
+        tile_pa = tile_data["pa"][0]
 
         dpos_offset = DITHER_OFFSETS[dpos]
-        rot_matrix = get_rot_matrix(field_pa or 0.0)
+        rot_matrix = get_rot_matrix(tile_pa)
 
         dpos_offset_pa = numpy.dot(rot_matrix, dpos_offset) / 3600
-        ra_offset = field_ra - dpos_offset_pa[0] / numpy.cos(numpy.radians(field_dec))
-        dec_offset = field_dec - dpos_offset_pa[1]
+        posci_ra = tile_ra - dpos_offset_pa[0] / numpy.cos(numpy.radians(tile_dec))
+        posci_dec = tile_dec - dpos_offset_pa[1]
+
+        wcs_skycoord = SkyCoord(ra=coadd_wcs_ra, dec=coadd_wcs_dec, unit="deg")
+        posci_skycoord = SkyCoord(ra=posci_ra, dec=posci_dec, unit="deg")
 
         new_data.append(
             {
@@ -150,16 +157,20 @@ def collect_coadd_pointings():
                 "dpos_dec": dpos_offset[1],
                 "dpos_rot_ra": dpos_offset_pa[0],
                 "dpos_rot_dec": dpos_offset_pa[1],
-                "field_ra": field_ra,
-                "field_dec": field_dec,
-                "field_pa": field_pa,
-                "poscira": spectro_header.get("POSCIRA", None),
-                "poscidec": spectro_header.get("POSCIDE", None),
-                "poscipa": spectro_header.get("POSCIPA", None),
-                "wcs_ra": wcs_ra,
-                "wcs_dec": wcs_dec,
-                "ra_offset": ra_offset,
-                "dec_offset": dec_offset,
+                "tile_ra": tile_ra,
+                "tile_dec": tile_dec,
+                "tile_pa": tile_pa,
+                "coadd_field_ra": coadd_field_ra,
+                "coadd_field_dec": coadd_field_dec,
+                "coadd_field_pa": coadd_field_pa,
+                "poscira_current": spectro_header.get("POSCIRA", None),
+                "poscidec_current": spectro_header.get("POSCIDE", None),
+                "poscipa_current": spectro_header.get("POSCIPA", None),
+                "coadd_wcs_ra": coadd_wcs_ra,
+                "coadd_wcs_dec": coadd_wcs_dec,
+                "posci_ra": posci_ra,
+                "posci_dec": posci_dec,
+                "wcs_posci_sep": wcs_skycoord.separation(posci_skycoord).arcsec,
             }
         )
 
@@ -174,25 +185,24 @@ def collect_coadd_pointings():
             "dpos_dec": polars.Float64,
             "dpos_rot_ra": polars.Float64,
             "dpos_rot_dec": polars.Float64,
-            "field_ra": polars.Float64,
-            "field_dec": polars.Float64,
-            "field_pa": polars.Float64,
-            "poscira": polars.Float64,
-            "poscidec": polars.Float64,
-            "poscipa": polars.Float64,
-            "wcs_ra": polars.Float64,
-            "wcs_dec": polars.Float64,
-            "ra_offset": polars.Float64,
-            "dec_offset": polars.Float64,
+            "tile_ra": polars.Float64,
+            "tile_dec": polars.Float64,
+            "tile_pa": polars.Float64,
+            "coadd_field_ra": polars.Float64,
+            "coadd_field_dec": polars.Float64,
+            "coadd_field_pa": polars.Float64,
+            "poscira_current": polars.Float64,
+            "poscidec_current": polars.Float64,
+            "poscipa_current": polars.Float64,
+            "coadd_wcs_ra": polars.Float64,
+            "coadd_wcs_dec": polars.Float64,
+            "posci_ra": polars.Float64,
+            "posci_dec": polars.Float64,
+            "wcs_posci_sep": polars.Float64,
         },
     )
 
-    if df is not None:
-        df = polars.concat([df, new_data_df])
-    else:
-        df = new_data_df
-
+    df = new_data_df
     df = df.sort("exposure_no")
-    df.write_parquet(output_file)
 
     return df
