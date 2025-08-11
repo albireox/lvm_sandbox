@@ -83,11 +83,25 @@ def _process_mjd(dir: pathlib.Path):
     return data
 
 
+def get_dirs(dirs: list[pathlib.Path], min_mjd: int | None, max_mjd: int | None):
+    """Filters directories based on MJD range."""
+
+    if min_mjd is not None:
+        dirs = [d for d in dirs if int(d.parts[-1]) >= min_mjd]
+
+    if max_mjd is not None:
+        dirs = [d for d in dirs if int(d.parts[-1]) <= max_mjd]
+
+    return dirs
+
+
 def collect_agcam_data():
     """Collects focus sweep data from AGCAM files."""
 
     agcam_path = pathlib.Path(AGCAM_ROOT)
+
     dirs = sorted(agcam_path.glob("6*"))
+    dirs = get_dirs(dirs, min_mjd=60350, max_mjd=60900)
 
     data: list[dict] = []
 
