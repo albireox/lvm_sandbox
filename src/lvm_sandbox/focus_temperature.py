@@ -12,7 +12,10 @@ import multiprocessing
 import pathlib
 
 import polars
+import scipy
+import seaborn
 from astropy.io import fits
+from matplotlib import pyplot as plt
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -122,3 +125,47 @@ def collect_agcam_data():
     )
 
     return df.sort(["mjd", "telescope", "image_no"])
+
+
+def fit_data(telescope: str, data: polars.DataFrame):
+    """Fits focus-temperature."""
+
+    avg = data.group_by("frame.focus_position", as_index=False).mean()
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 10))
+
+    for sensor in [1, 2]:
+        if f"sensor{sensor}.temperature" in data:
+            slope, intercept, r, p, sterr = scipy.stats.linregress(
+                x=data[f"sensor{sensor}.temperature"],
+                y=data["frame.focus_position"],
+            )
+
+            print(f"{telescope}, sensor{sensor}")
+            print(
+                f"slope={slope:.3f}, intercept={intercept:.3f}, "
+                f"r={r:.3f}, p={p}, sterr={sterr:.6f}"
+            )
+
+        if f"sensor{sensor}.temperature" in data:
+            seaborn.scatterplot(
+                data=data,
+                x=f"sensor{sensor}.temperature",
+                y="frame.focus_position",
+                ax=axes[0],
+            )
+
+            seaborn.regplot(
+                data=avg,
+                x=f"sensor{sensor}.temperature",
+                y="frame.focus_position",
+                ax=axes[1],
+            )
+
+    fig.savefig(str(OUTPATH / f"focus_temperature_{telescope}.pdf"))
+
+    print()
+
+
+def process_focus_data(data: polars.DataFrame | str | pathlib.Path):
+    """Processes focus data and determines the focus-temperature relation."""
