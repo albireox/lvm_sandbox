@@ -26,6 +26,7 @@ from rich.progress import (
 
 
 AGCAM_ROOT = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/agcam/lco"
+OUTPATH = pathlib.Path(__file__).parent / "../../outputs/focus_sweeps"
 
 
 def _process_mjd(dir: pathlib.Path):
@@ -39,7 +40,7 @@ def _process_mjd(dir: pathlib.Path):
         n_sweep = 0
         was_sweep = False
 
-        files = sorted(dir.glob(f"lvm.{telescope}.agcam*.fits"))
+        files = sorted(dir.glob(f"lvm.{telescope}.agcam.east_*.fits"))
 
         for file in files:
             image_no = int(file.stem.split("_")[-1])
@@ -79,6 +80,31 @@ def _process_mjd(dir: pathlib.Path):
                         "n_sweep": n_sweep,
                     }
                 )
+
+                # Check if the "west" version of the file exists and if so,
+                # add that files as well.
+                ag_west = pathlib.Path(str(file).replace(".east_", ".west_"))
+                if ag_west.exists():
+                    with fits.open(ag_west) as hdul_west:
+                        raw_header_west = hdul_west["RAW"].header
+                        proc_header_west = hdul_west["PROC"].header
+
+                        data.append(
+                            {
+                                "mjd": int(mjd),
+                                "image_no": image_no,
+                                "telescope": raw_header_west["TELESCOP"],
+                                "camname": raw_header_west["CAMNAME"],
+                                "bentempi": raw_header_west["BENTEMPI"],
+                                "bentempo": raw_header_west["BENTEMPO"],
+                                "benhumi": raw_header_west["BENHUMI"],
+                                "benhumo": raw_header_west["BENHUMO"],
+                                "focusdt": raw_header_west["FOCUSDT"],
+                                "airmass": raw_header_west["AIRMASS"],
+                                "fwhm": proc_header_west["FWHM"],
+                                "n_sweep": n_sweep,
+                            }
+                        )
 
     return data
 
@@ -170,7 +196,7 @@ def fit_data(telescope: str, data: polars.DataFrame):
             )
 
             seaborn.regplot(
-                data=avg,
+                data=avg.to_pandas(),
                 x=f"sensor{sensor}.temperature",
                 y="frame.focus_position",
                 ax=axes[1],
