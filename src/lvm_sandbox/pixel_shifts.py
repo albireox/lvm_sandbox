@@ -133,19 +133,26 @@ def _process_spectro_file(file: pathlib.Path):
     ccd_temp = hdul[0].header["CCDTEMP1"]
     ln2_temp = hdul[0].header["CCDTEMP2"]
 
+    data = hdul[0].data
+    saturated_frac = numpy.sum(data >= 65500) / data.size
+
     return_dict = {
         "MJD": mjd,
         "exp_no": exp_no,
         "exp_type": exp_type,
         "exp_time": exp_time,
         "spec": spec,
+        "saturated_frac": float(saturated_frac),
+        "perc_98": float(numpy.percentile(data, 98)),
+        "n_shifts": None,
+        "y_shifts": None,
     }
 
     if ccd_temp > -80 or ln2_temp > -150:
         return None
 
     # Get the first column of the data array.
-    col = hdul[0].data[:, 0].astype("f4")
+    col = data[:, 0].astype("f4")
 
     # Start with a simple test. If the standard deviation of the first column for
     # each quadrant is small, that means that there are no shifted pixels.
@@ -154,13 +161,6 @@ def _process_spectro_file(file: pathlib.Path):
 
     if col0.std() < 5 and col1.std() < 5:
         return None
-
-    if col0.std() > 5:
-        i0 = 0
-        col = col0
-    else:
-        i0 = 2040
-        col = col1
 
     # Now identify the location of the shifted pixel. We first run a rolling mean to
     # smooth the data. This means the position we'll determine is only approximate,
@@ -172,21 +172,31 @@ def _process_spectro_file(file: pathlib.Path):
 
     # If all labels are -1 or all are 0, then no clusters were found.
     if numpy.all(labels == -1):
-        return None
+        return return_dict
 
-    labels = labels[labels != -1]
-    if numpy.all(labels == 0):
-        return None
+    if numpy.any(labels == -1):
+        last = 0
+        for ii in range(len(labels)):
+            if labels[ii] == -1:
+                labels[ii] = last
+            else:
+                last = labels[ii]
 
     # Find indices in which the label changes
     ch_idx = numpy.where(labels[:-1] != labels[1:])[0]
 
-    # There should only be one change, corresponding to the pixel shift.
-    if len(ch_idx) > 1:
-        rprint(f"[yellow]Multiple pixel shifts found in {file}[/yellow]")
-        return None
+    y_shifts: list[int] = []
+    for i0 in ch_idx:
+        # Skip the transition between quadrants
+        if abs(i0 - 2040 + 9) < 20:
+            continue
+        y_shifts.append(int(i0) + 9)  # +9 because of the rolling mean
 
-    return_dict["y_shift"] = i0 + ch_idx[0] + 9  # +9 because of the rolling mean
+    return_dict["n_shifts"] = len(y_shifts)
+    return_dict["y_shifts"] = y_shifts
+
+    if len(y_shifts) == 0:
+        return None
 
     return return_dict
 
@@ -251,12 +261,15 @@ def generate_pixel_shift_list(
     SPECTRO_DIR = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/lvm/lco/"
 
     SCHEMA = {
-        "MJD": polars.Int64,
+        "MJD": polars.Int32,
         "exp_no": polars.Int32,
         "spec": polars.String,
         "exp_type": polars.String,
         "exp_time": polars.Float32,
-        "y_shift": polars.Int32,
+        "saturated_frac": polars.Float32,
+        "perc_98": polars.Float32,
+        "n_shifts": polars.Int16,
+        "y_shifts": polars.List(polars.Int32),
     }
 
     dirs = list(sorted(pathlib.Path(SPECTRO_DIR).glob("6*")))
