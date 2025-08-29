@@ -76,17 +76,40 @@ def parse_shift_monitor_files():
 
 
 def rsync_spectro_files(
-    mjd: int,
-    exp_no: int,
+    mjd: int | polars.DataFrame,
+    exp_no: int | None = None,
     spec: Literal["sp1", "sp2", "sp3"] | None = None,
+    camera: Literal["r", "b", "z"] | None = None,
+    destination_path: str | pathlib.Path | None = None,
 ):
     """Rsyncs the spectroscopic files from Utah to the local directory."""
 
-    dst = DATA_ROOT / f"{mjd}"
+    if destination_path is not None:
+        dst = pathlib.Path(destination_path)
+    else:
+        dst = DATA_ROOT / f"{mjd}"
+
     dst.mkdir(parents=True, exist_ok=True)
 
+    if isinstance(mjd, polars.DataFrame):
+        df = mjd
+        for row in df.iter_rows(named=True):
+            rsync_spectro_files(
+                mjd=row["MJD"],
+                exp_no=row["exp_no"],
+                spec=row["spec"],
+                camera=camera,
+                destination_path=dst,
+            )
+        return
+
+    assert exp_no is not None, "exp_no must be provided if mjd is not a DataFrame."
+
     if spec:
-        query = f"sdR-s-*{spec[-1]}-*{exp_no}.fits.gz"
+        if camera:
+            query = f"sdR-s-{camera}{spec[-1]}-*{exp_no}.fits.gz"
+        else:
+            query = f"sdR-s-*{spec[-1]}-*{exp_no}.fits.gz"
     else:
         query = f"sdR-s-*{exp_no}.fits.gz"
 
