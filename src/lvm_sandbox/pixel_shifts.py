@@ -431,3 +431,184 @@ def generate_pixel_shift_list_ff(n_cpus: int = 10, skip_processed: bool = True):
                 df.write_parquet(DF_PATH)
 
         return df
+
+
+def fits_to_buffer(
+    exp_no: int,
+    spec: Literal["sp1", "sp2", "sp3"],
+    root_path: str | pathlib.Path,
+    prefix: bytearray | None = None,
+    replace_position: tuple[int, int] | None = None,
+):
+    """Reconstructs the image buffer for a given exposure number."""
+
+    PIXELS = (4080, 4120)
+
+    if isinstance(root_path, str):
+        root_path = pathlib.Path(root_path)
+
+    buffer_array = numpy.zeros((PIXELS[0], PIXELS[1] * 3), dtype=numpy.int16)
+
+    for ii, camera in enumerate(["r", "b", "z"]):
+        cam_spec = f"{camera}{spec[-1]}"
+
+        file_path = root_path / f"sdR-s-{cam_spec}-{exp_no:08d}.fits.gz"
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        data = fits.getdata(file_path).astype("<u2")
+        buffer_array[:, ii * PIXELS[1] : (ii + 1) * PIXELS[1]] = data
+
+    buffer_ba = bytearray(buffer_array.tobytes())
+    if (rem := len(buffer_ba) % 1024) != 0:
+        buffer_ba += b"\0" * (1024 - rem)
+
+    assert len(buffer_ba) % 1024 == 0
+
+    if prefix is not None:
+        if replace_position:
+            i0 = replace_position[1] * 4120 * 2 + replace_position[0] * 2
+            buffer_ba[i0 : i0 + 4] = prefix
+
+        buffer_chunks: list[bytearray] = []
+        ii = 0
+        while True:
+            start = ii * 1024
+            end = start + 1024
+            chunk = buffer_ba[start:end]
+            if len(chunk) == 0:
+                break
+            buffer_chunks.append(bytearray(prefix) + chunk)
+            ii += 1
+
+        buffer_ba = b"".join(buffer_chunks)
+
+    return buffer_ba
+
+
+def reconstruct_from_buffer(
+    buffer_file: str | pathlib.Path,
+    exp_no: int,
+    spec: Literal["sp1", "sp2", "sp3"],
+    root_path: str | pathlib.Path | None = None,
+    compare_files: bool = False,
+    has_prefix: bool = True,
+    remove_prefix_mode: Literal["replace", "slice"] = "replace",
+    fits_file_prefix: str = "reconstructed-",
+):
+    """Reconstruct FITS images from a buffer byte array file."""
+
+    buffer_file = pathlib.Path(buffer_file)
+    if not buffer_file.exists():
+        raise FileNotFoundError(f"Buffer file not found: {buffer_file}")
+
+    with open(buffer_file, "rb") as f:
+        buffer_data = f.read()
+
+    if has_prefix:
+        prefix = buffer_data[:4]
+        if remove_prefix_mode == "replace":
+            buffer_data = buffer_data.replace(prefix, b"")
+        elif remove_prefix_mode == "slice":
+            raise NotImplementedError("Slicing prefix removal is not implemented.")
+
+    N_PIXELS = 4080 * 4120 * 3
+    buffer_data = buffer_data[: N_PIXELS * 2]
+
+    data = numpy.frombuffer(buffer_data, dtype="<u2").reshape((4080, 4120 * 3))
+
+    for ii, camera in enumerate(["r", "b", "z"]):
+        cam_spec = f"{camera}{spec[-1]}"
+
+        camera_data = data[:, ii * 4120 : (ii + 1) * 4120]
+        assert camera_data.shape == (4080, 4120)
+
+        if compare_files:
+            if root_path is None:
+                raise ValueError("Root path must be specified for comparison.")
+
+            root_path = pathlib.Path(root_path)
+            orig_path = root_path / f"sdR-s-{cam_spec}-{exp_no:08d}.fits.gz"
+            if not orig_path.exists():
+                raise FileNotFoundError(f"Original file not found: {orig_path}")
+
+            orig_data = fits.getdata(orig_path).astype("<u2")
+            assert orig_data.shape == (4080, 4120)
+
+            if not numpy.array_equal(camera_data, orig_data):
+                rprint(f"[red]Data mismatch found for {exp_no}-{cam_spec}.[/]")
+
+        buffer_root = buffer_file.parent
+        camera_file = buffer_root / f"{fits_file_prefix}{cam_spec}-{exp_no:08d}.fits"
+
+        hdul = fits.PrimaryHDU(data=camera_data)
+        hdul.writeto(camera_file, overwrite=True)
+
+
+def collate_cameras(
+    exposure: str | pathlib.Path,
+    output: str | pathlib.Path | None = None,
+):
+    """Collates the three camera FITS files into a single FITS file.
+
+    Parameters
+    ----------
+    exposure
+        The exposure path (any of the three cameras, the other two are derived
+        from the file name).
+    output
+        The output file path.
+
+    """
+
+    exposure = pathlib.Path(exposure)
+    if not exposure.exists():
+        raise FileNotFoundError(f"Exposure file not found: {exposure}")
+
+    root_path = exposure.parent
+
+    sample_name = exposure.name
+    sample_match = re.match(r"sdR-s-([rbz][123])-(\d{8})\.fits.gz", sample_name)
+    if not sample_match:
+        raise ValueError(f"Invalid exposure file name: {sample_name}")
+
+    sample_camera = sample_match.group(1)
+    sample_exposure = sample_match.group(2)
+    spec = sample_camera[-1]
+
+    collated = numpy.zeros((4080, 4120 * 3), dtype=numpy.uint16)
+    for ii, camera in enumerate(["r", "b", "z"]):
+        cam_name = sample_name.replace(sample_camera, f"{camera}{spec}")
+
+        cam_data = fits.getdata(root_path / cam_name).astype("<u2")
+        cam_header = fits.getheader(root_path / cam_name)
+
+        collated[:, ii * 4120 : (ii + 1) * 4120] = cam_data
+
+    hdul = fits.PrimaryHDU(data=collated, header=cam_header)
+
+    if not output:
+        output = root_path / f"sdR-s-sp{spec}-collated-{sample_exposure}.fits.gz"
+
+    hdul.writeto(output, overwrite=True)
+
+
+def fix_collated_image(image: str | pathlib.Path, shifts: list[tuple[int, int]]):
+    """Fixes the collated image by applying a shift."""
+
+    image = pathlib.Path(image)
+    if not image.exists():
+        raise FileNotFoundError(f"Image file not found: {image}")
+
+    data, header = fits.getdata(image, header=True)
+
+    data = data.flatten()
+    new_data = numpy.zeros(len(data), dtype=data.dtype)
+    for _, (xx, yy) in enumerate(shifts):
+        idx = yy * 4120 * 3 + xx
+        new_data[0:idx] = data[0:idx]
+        new_data[idx + 2 :] = data[idx:-2]
+
+    new_image = image.with_name(image.name.replace(".fits.gz", "_fixed.fits.gz"))
+    hdul = fits.PrimaryHDU(data=new_data.reshape((4080, 4120 * 3)), header=header)
+    hdul.writeto(new_image, overwrite=True)
