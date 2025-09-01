@@ -11,6 +11,8 @@ from __future__ import annotations
 import multiprocessing
 import pathlib
 
+import numpy
+import numpy.typing as npt
 import polars
 import scipy
 import seaborn
@@ -23,10 +25,11 @@ from rich.progress import (
     TextColumn,
     TimeRemainingColumn,
 )
+from scipy.interpolate import UnivariateSpline
 
 
 AGCAM_ROOT = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/agcam/lco"
-OUTPATH = pathlib.Path(__file__).parent / "../../outputs/focus_sweeps"
+OUTPATH = pathlib.Path(__file__).parent / "../../outputs/focus_sweeps_2025"
 
 
 def _process_mjd(dir: pathlib.Path):
@@ -207,5 +210,178 @@ def fit_data(telescope: str, data: polars.DataFrame):
     print()
 
 
+def fit_spline(x: npt.ArrayLike, y: npt.ArrayLike, w: npt.ArrayLike | None = None):
+    """Fits a spline to data."""
+
+    spl = UnivariateSpline(x, y, w=w)
+
+    corr_matrix = numpy.corrcoef(y, spl(x))  # type: ignore
+    R2 = corr_matrix[0, 1] ** 2
+
+    return spl, R2
+
+
+def _do_sweep(data: polars.DataFrame):
+    """Performs a focus sweep on the data."""
+
+    data = data.select(
+        polars.col(
+            "mjd",
+            "n_sweep",
+            "bentempi",
+            "bentempo",
+            "focusdt",
+            "fwhm",
+        )
+    )
+
+    schema = {
+        "mjd": polars.Int32,
+        "n_sweep": polars.Int32,
+        "bentempi": polars.Float32,
+        "bentempo": polars.Float32,
+        "focusdt": polars.Float32,
+        "fwhm": polars.Float32,
+        "valid": polars.Boolean,
+    }
+    return_df = polars.DataFrame(
+        {
+            "mjd": data["mjd"][0],
+            "n_sweep": data["n_sweep"][0],
+            "bentempi": None,
+            "bentempo": None,
+            "focusdt": None,
+            "fwhm": None,
+            "valid": False,
+        },
+        schema=schema,
+    )
+
+    data = data.group_by("focusdt").mean()
+
+    if data.height < 5:
+        return return_df
+
+    data = data.sort("focusdt")
+
+    spl, r2 = fit_spline(
+        x=data["focusdt"].to_numpy(),
+        y=data["fwhm"].to_numpy(),
+        w=numpy.ones(data.height),
+    )
+
+    if r2 < 0.8:
+        return return_df
+
+    x_refine = numpy.arange(data["focusdt"].min(), data["focusdt"].max(), 0.01)
+    y_refine = spl(x_refine)
+
+    arg_min = numpy.argmin(y_refine)
+    xmin = x_refine[arg_min]
+    ymin = y_refine[arg_min]
+
+    return_df = polars.DataFrame(
+        {
+            "mjd": int(data["mjd"][0]),
+            "n_sweep": int(data["n_sweep"][0]),
+            "bentempi": data["bentempi"].mean(),
+            "bentempo": data["bentempo"].mean(),
+            "focusdt": xmin,
+            "fwhm": ymin,
+            "valid": True,
+        },
+        schema=schema,
+    )
+
+    if numpy.isnan(ymin) or ymin < 0:  # type:ignore
+        return_df[0, "valid"] = False
+
+    return return_df
+
+
 def process_focus_data(data: polars.DataFrame | str | pathlib.Path):
     """Processes focus data and determines the focus-temperature relation."""
+
+    if isinstance(data, (str, pathlib.Path)):
+        data = polars.read_parquet(data)
+
+    tels_data = []
+    for telescope in ["sci", "spec", "skye", "skyw"]:
+        tel_data = data.filter(polars.col.telescope == telescope)
+
+        tel_focus_data = tel_data.group_by("mjd", "n_sweep").map_groups(_do_sweep)
+        tel_focus_data = tel_focus_data.with_columns(telescope=polars.lit(telescope))
+
+        tels_data.append(tel_focus_data)
+
+    focus_data = polars.concat(tels_data)
+
+    return focus_data.select(
+        "telescope",
+        "mjd",
+        "n_sweep",
+        "bentempi",
+        "bentempo",
+        "focusdt",
+        "fwhm",
+        "valid",
+    ).sort("telescope", "mjd", "n_sweep")
+
+
+def plot_focus_data(data: polars.DataFrame | str | pathlib.Path):
+    """Plots focus-temperature data."""
+
+    seaborn.set_theme(
+        style="whitegrid",
+        font_scale=1.2,
+        palette="deep",
+        color_codes=True,
+    )
+    plt.ioff()
+
+    if isinstance(data, (str, pathlib.Path)):
+        data = polars.read_parquet(data)
+
+    for telescope in ["sci", "spec", "skye", "skyw"]:
+        tel_data = data.filter(
+            polars.col.telescope == telescope,
+            polars.col.valid,
+        )
+
+        has_bentempo = (
+            tel_data["bentempo"].is_not_null().any()
+            and (tel_data["bentempo"] > -999).any()
+        )
+
+        fig, axes = plt.subplots(2 if has_bentempo else 1, 1, figsize=(18, 10))
+        ax = axes[0] if has_bentempo else axes
+
+        seaborn.scatterplot(
+            data=tel_data.to_pandas(),
+            x="bentempi",
+            y="focusdt",
+            ax=ax,
+            zorder=10,
+        )
+
+        coeffs = numpy.polyfit(tel_data["bentempi"], tel_data["focusdt"], deg=1)
+        fit = numpy.poly1d(coeffs)
+
+        xx = numpy.arange(-5, 25, 0.05)
+        yy = fit(xx)
+        fit_plot = ax.plot(xx, yy, c="r")
+
+        ax.legend(fit_plot, [f"y={coeffs[0]:.3f}x + {coeffs[1]:.3f}"])
+
+        if has_bentempo:
+            seaborn.scatterplot(
+                data=tel_data.to_pandas(),
+                x="bentempo",
+                y="focusdt",
+                ax=axes[1],
+            )
+
+        OUTPATH.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(OUTPATH / f"focus_{telescope}.pdf"))
+
+        plt.close(fig)
