@@ -346,6 +346,13 @@ def plot_focus_data(data: polars.DataFrame | str | pathlib.Path):
         tel_data = data.filter(
             polars.col.telescope == telescope,
             polars.col.valid,
+            polars.col.mjd <= 60980,
+        )
+
+        tel_data_new = data.filter(
+            polars.col.telescope == telescope,
+            polars.col.valid,
+            polars.col.mjd >= 60986,
         )
 
         has_bentempo = (
@@ -364,14 +371,37 @@ def plot_focus_data(data: polars.DataFrame | str | pathlib.Path):
             zorder=10,
         )
 
+        seaborn.scatterplot(
+            data=tel_data_new.to_pandas(),
+            x="bentempi",
+            y="focusdt",
+            ax=ax,
+            color="r",
+            zorder=20,
+        )
+
         coeffs = numpy.polyfit(tel_data["bentempi"], tel_data["focusdt"], deg=1)
         fit = numpy.poly1d(coeffs)
 
+        coeffs_new = numpy.polyfit(
+            tel_data_new["bentempi"], tel_data_new["focusdt"], deg=1
+        )
+        fit_new = numpy.poly1d(coeffs_new)
+
         xx = numpy.arange(-5, 25, 0.05)
         yy = fit(xx)
-        fit_plot = ax.plot(xx, yy, c="r")
+        yy_new = fit_new(xx)
 
-        ax.legend(fit_plot, [f"y={coeffs[0]:.3f}x + {coeffs[1]:.3f}"])
+        fit_plot = ax.plot(xx, yy, c="k")
+        fit_plot_new = ax.plot(xx, yy_new, c="r", linestyle="--")
+
+        ax.legend(
+            fit_plot + fit_plot_new,
+            [
+                f"y={coeffs[0]:.3f}x + {coeffs[1]:.3f}",
+                f"y={coeffs_new[0]:.3f}x + {coeffs_new[1]:.3f}",
+            ],
+        )
 
         if has_bentempo:
             seaborn.scatterplot(
@@ -379,6 +409,14 @@ def plot_focus_data(data: polars.DataFrame | str | pathlib.Path):
                 x="bentempo",
                 y="focusdt",
                 ax=axes[1],
+            )
+            seaborn.scatterplot(
+                data=tel_data_new.to_pandas(),
+                x="bentempo",
+                y="focusdt",
+                ax=axes[1],
+                zorder=20,
+                color="r",
             )
 
         OUTPATH.mkdir(parents=True, exist_ok=True)
